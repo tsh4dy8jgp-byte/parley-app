@@ -28,7 +28,7 @@ class RenderOptions:
     loudness: str = "lufs"          # "lufs" or "dbfs"
     target: float = -16.0           # LUFS target (or dBFS target in dbfs mode)
     bitrate: str = "64k"
-    album: str = "Deutsch im Ohr"   # mp3 album tag
+    album: str = "Parley"           # mp3 album tag
 
 
 def jobs_for(script: Script, opts: RenderOptions) -> List[Job]:

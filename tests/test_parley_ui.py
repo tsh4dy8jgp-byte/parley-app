@@ -51,6 +51,13 @@ def test_example_dialogue_is_detected_and_cast(app):
     assert "A → " in app.standard.status.cget("text")
 
 
+def test_multilingual_narrator_is_flagged_in_the_status_line(app):
+    app.model.narrator.voice.set("en-US-AndrewMultilingualNeural")
+    app.standard.set_text("Just some prose to read aloud.")
+    app.validate_now()
+    assert "⚠ the narrator uses multilingual voice" in app.standard.status.cget("text")
+
+
 def test_problem_lines_are_marked(app):
     app.standard.set_text("[A] Hi\n[B Yo\n[C] Bye")
     app.validate_now()

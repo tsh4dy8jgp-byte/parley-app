@@ -1,0 +1,49 @@
+# Builds the Parley desktop app on each OS (PyInstaller can't cross-compile) and runs its self-test.
+# Run it by hand from the Actions tab, or push a tag like v0.1.0 to also attach the builds to a release.
+name: Build app
+
+on:
+  workflow_dispatch:
+  push:
+    tags: ["v*"]
+
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, macos-latest, macos-15-intel]   # Windows x64, Apple Silicon, Intel Mac
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.13"
+      - name: Check that Tk works
+        run: python -c "import tkinter; tkinter.Tk().destroy()"
+      - name: Install
+        run: python -m pip install -e ".[gui,build]"
+      - name: Build and self-test
+        run: python packaging/build.py --online   # --online: the self-test also synthesizes one line
+      - uses: actions/upload-artifact@v4
+        with:
+          name: parley-${{ matrix.os }}
+          path: |
+            dist/*.dmg
+            dist/*.zip
+          if-no-files-found: error
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*

@@ -1,4 +1,4 @@
-"""Role -> edge-tts voice mapping: defaults, voices.yaml, prosody arithmetic."""
+"""Role -> edge-tts voice mapping: voices.yaml, prosody arithmetic, voice warnings."""
 
 from __future__ import annotations
 
@@ -6,6 +6,8 @@ import re
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional
+
+from ..audiobook.voices import is_multilingual, multilingual_warning
 
 RATE_RE = re.compile(r"^[+-]\d{1,3}%$")
 VOLUME_RE = RATE_RE
@@ -39,22 +41,6 @@ class VoiceSpec:
                  if _num(getattr(self, k)) != 0]
         return " ".join(parts) or "-"
 
-
-# Default cast: the German course "Deutsch im Ohr" (kept outside this repo). Its lesson files
-# carry the same cast in their @voices block, generated from this list by its src_to_tagged.py.
-DEFAULT_VOICES: Dict[str, VoiceSpec] = {
-    # German-only voices throughout: the *Multilingual* voices guess the language per line and
-    # read short German lines with English phonology ("Übung" -> "Ah-bang").
-    "Narrator": VoiceSpec("de-CH-JanNeural", rate="-10%"),
-    "Male1": VoiceSpec("de-AT-JonasNeural", rate="-5%", pitch="-6Hz"),
-    "Female1": VoiceSpec("de-AT-IngridNeural"),
-    "Male2": VoiceSpec("de-DE-ConradNeural"),
-    "Female2": VoiceSpec("de-DE-KatjaNeural"),
-    "Male3": VoiceSpec("de-DE-KillianNeural"),
-    "Female3": VoiceSpec("de-DE-AmalaNeural"),
-    "Female4": VoiceSpec("de-DE-KatjaNeural", rate="-5%", pitch="+10Hz"),  # Mariana, a learner
-    "Child1": VoiceSpec("de-DE-AmalaNeural", rate="+5%", pitch="+35Hz"),
-}
 
 # Roles that frame the lesson rather than act in it: no shadowing gap after them.
 NARRATOR_ROLES = frozenset({"Narrator"})
@@ -108,13 +94,12 @@ def duplicate_voice_warnings(voices: Mapping[str, VoiceSpec], used_roles: Iterab
     """Warn about voice choices that will sound wrong in one file.
 
     Identical voice+rate+pitch+volume on two roles -> indistinguishable (warning).
-    A *Multilingual* voice -> may switch language on short lines (warning).
+    A *Multilingual* voice -> pronunciation may be messy (warning).
     Same base voice with different prosody -> only prosody tells them apart (note).
     """
     used = [r for r in dict.fromkeys(used_roles) if r in voices]
-    out: List[str] = [f"warning: role {r} uses multilingual voice {voices[r].voice}; it may read short "
-                      "German lines with English pronunciation, prefer a de-AT/de-DE/de-CH voice"
-                      for r in used if "Multilingual" in voices[r].voice]
+    out: List[str] = [multilingual_warning(f"role {r}", voices[r].voice)
+                      for r in used if is_multilingual(voices[r].voice)]
     for i, a in enumerate(used):
         for b in used[i + 1:]:
             va, vb = voices[a], voices[b]

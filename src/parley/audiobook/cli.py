@@ -9,7 +9,7 @@ from pathlib import Path
 
 from .builder import build_audiobook, print_progress
 from .chunker import DEFAULT_CHUNK_SIZE
-from .voices import list_voices, resolve_voice
+from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -89,6 +89,8 @@ async def run(args: argparse.Namespace) -> None:
 
     voice = args.voice or await resolve_voice(args.language, args.gender)
     print(f"Narrator voice: {voice}", file=sys.stderr)
+    if is_multilingual(voice):
+        print(multilingual_warning("the narrator", voice), file=sys.stderr)
 
     output = await build_audiobook(
         text,

@@ -14,7 +14,7 @@ from .render import RenderOptions, render_scripts
 from .script import Script, ScriptError, load_lexicon, parse_file
 from .stitch import Gaps
 from .tts import CachedBackend, EdgeBackend
-from .voices import DEFAULT_VOICES, check_voices_exist, duplicate_voice_warnings, load_voices_yaml
+from .voices import check_voices_exist, duplicate_voice_warnings, load_voices_yaml
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,7 +25,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("files", nargs="+", help="tagged .txt files; globs are expanded (also on Windows)")
     r.add_argument("-o", "--out", default="out", help="output folder (default: %(default)s)")
     r.add_argument("--voices", help="voices.yaml with role -> voice defaults (a file's @voices wins)")
-    r.add_argument("--lexicon", help="course lexicon 'word = spoken form' (default: lexicon.txt next to "
+    r.add_argument("--lexicon", help="shared lexicon 'word = spoken form' (default: lexicon.txt next to "
                    "each tagged file, if present; a file's @lexicon entries win)")
     r.add_argument("--dry-run", action="store_true", help="print the parsed segment table, no TTS")
     r.add_argument("--continue-speaker", action="store_true",
@@ -46,10 +46,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--target", type=float, help="loudness target (default -16 LUFS / -20 dBFS)")
     r.add_argument("--concurrency", type=int, default=4, help="parallel TTS requests (%(default)s)")
     r.add_argument("--cache-dir", default=".dialog_tts_cache", help="TTS cache folder (%(default)s)")
+    r.add_argument("--album", default="Parley", help="mp3 album tag (%(default)s)")
 
-    v = sub.add_parser("voices", help="list German edge-tts voices and check files' voice mapping")
+    v = sub.add_parser("voices", help="list edge-tts voices and check files' voice mapping")
     v.add_argument("files", nargs="*", help="tagged files to check")
-    v.add_argument("--locale", default="de-", help="voice name prefix to list (%(default)s)")
+    v.add_argument("--locale", help="list voices whose name starts with this, e.g. de- or en-GB "
+                   "(default: all voices, or none when files are given)")
     return p
 
 
@@ -64,9 +66,7 @@ def expand(patterns: List[str]) -> List[Path]:
 
 
 def load_scripts(files: List[Path], voices_yaml, continue_speaker: bool, lexicon=None) -> List[Script]:
-    base = dict(DEFAULT_VOICES)
-    if voices_yaml:
-        base.update(load_voices_yaml(Path(voices_yaml)))
+    base = load_voices_yaml(Path(voices_yaml)) if voices_yaml else {}
     lexicons = {}
     scripts, failed = [], False
     for f in files:
@@ -124,7 +124,7 @@ def cmd_render(a: argparse.Namespace) -> None:
     opts = RenderOptions(
         gaps=Gaps(change_ms=a.gap_change, same_ms=a.gap_same, repeat_ms=a.gap_repeat),
         shadow_factor=a.shadow_factor, shadow=a.shadow, slow=a.slow, srt=a.srt, lrc=a.lrc,
-        clips=a.clips, wav=a.wav, loudness=a.loudness, target=target,
+        clips=a.clips, wav=a.wav, loudness=a.loudness, target=target, album=a.album,
     )
     backend = CachedBackend(EdgeBackend(concurrency=a.concurrency), Path(a.cache_dir))
     t0 = time.perf_counter()
@@ -140,9 +140,10 @@ def cmd_render(a: argparse.Namespace) -> None:
 def cmd_voices(a: argparse.Namespace) -> None:
     import edge_tts
 
-    voices = [v for v in asyncio.run(edge_tts.list_voices()) if v["ShortName"].startswith(a.locale)]
-    for v in sorted(voices, key=lambda v: v["ShortName"]):
-        print(f"{v['ShortName']:<36} {v['Gender']:<7} {v['Locale']}")
+    if a.locale is not None or not a.files:
+        voices = [v for v in asyncio.run(edge_tts.list_voices()) if v["ShortName"].startswith(a.locale or "")]
+        for v in sorted(voices, key=lambda v: v["ShortName"]):
+            print(f"{v['ShortName']:<36} {v['Gender']:<7} {v['Locale']}")
     if a.files:
         scripts = load_scripts(expand(a.files), None, False)
         specs = {spec for s in scripts for spec in s.voices.values()}

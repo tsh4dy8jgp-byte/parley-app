@@ -157,9 +157,10 @@ def test_build_cast_precedence(catalog):
     assert cast["C"] == auto["C"].shifted(rate=-10)
 
 
-def test_build_cast_german_defaults(catalog):
-    cast = jobs.build_cast(st.Settings(language="de-AT"), ["Male1", "X"], catalog)
-    assert cast["Male1"].voice == "de-AT-JonasNeural"           # course default, like the CLI
+def test_build_cast_is_automatic_for_german_too(de_catalog):
+    cast = jobs.build_cast(st.Settings(language="de-DE"), ["Male1", "X"], de_catalog)
+    assert set(cast) == {"Male1", "X"}                          # no built-in course cast
+    assert all(v.voice.startswith("de-") for v in cast.values())
 
 
 def test_validate_reports_problems_and_cast(catalog):
@@ -175,6 +176,14 @@ def test_validate_reports_problems_and_cast(catalog):
 def test_validate_file_voices_block_wins(catalog):
     text = "@voices\nA = en-GB-SoniaNeural\n@end\n[A] Hi"
     assert jobs.validate(text, st.Settings(), catalog).voices["A"].voice == "en-GB-SoniaNeural"
+
+
+def test_validate_warns_about_a_multilingual_narrator(catalog):
+    prose = "Just some prose."
+    assert jobs.validate(prose, st.Settings(language="en-US"), catalog).warnings == []   # automatic voice
+    s = st.Settings(language="en-US", narrator=st.Speaker("en-US-AndrewMultilingualNeural"))
+    (w,) = jobs.validate(prose, s, catalog).warnings
+    assert w.startswith("warning: the narrator uses multilingual voice en-US-AndrewMultilingualNeural;")
 
 
 def test_render_options_mapping():
@@ -294,10 +303,11 @@ def test_validate_reports_the_voices_actually_used(catalog):
     assert jobs.validate(LESSON, s, catalog).voices["Male3"] == VoiceSpec("de-DE-KillianNeural", volume="-10%")
 
 
-def test_sliders_apply_to_german_course_roles(catalog):
-    s = st.Settings(language="de-AT")
+def test_sliders_apply_to_automatic_voices(de_catalog):
+    s = st.Settings(language="de-DE")
+    auto = jobs.build_cast(s, ["Male3"], de_catalog)["Male3"]
     s.speakers["Male3"] = st.Speaker("", rate=-30)
-    assert jobs.build_cast(s, ["Male3"], catalog)["Male3"] == VoiceSpec("de-DE-KillianNeural", rate="-30%")
+    assert jobs.build_cast(s, ["Male3"], de_catalog)["Male3"] == VoiceSpec(auto.voice, rate="-30%")
 
 
 @pytest.fixture
@@ -345,3 +355,17 @@ def test_language_fixed_for_narration_with_picked_voice(de_catalog):
     s = st.Settings(language="en-US", narrator=st.Speaker("de-DE-KatjaNeural"))
     u = use("Just some prose.", s, de_catalog)
     assert (u.state, u.source, u.language) == ("fixed", "advanced", "German")
+
+
+def test_engines_import_without_tk():
+    """The CLIs must work without the gui extra, so the engines may not pull in the app."""
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    code = ("import sys, parley.dialog_tts.cli, parley.audiobook.cli\n"
+            "loaded = {'tkinter', 'customtkinter'} & set(sys.modules)\n"
+            "assert not loaded, loaded")
+    src = Path(__file__).resolve().parents[1] / "src"   # cwd=src so the root parley.py can't shadow the package
+    r = subprocess.run([sys.executable, "-c", code], cwd=src, capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr

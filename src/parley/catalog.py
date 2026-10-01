@@ -9,8 +9,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Tuple
 
-from .audiobook.voices import PREFERRED_VOICES
-from .dialog_tts.voices import DEFAULT_VOICES, VoiceSpec
+from .audiobook.voices import PREFERRED_VOICES, is_multilingual
+from .dialog_tts.voices import VoiceSpec
 
 # When a language has fewer voices than the dialogue has speakers, voices are reused with one of
 # these (rate %, pitch Hz) shifts so every speaker still sounds different (cf. Female4 / Child1).
@@ -32,7 +32,7 @@ class Voice:
 
     @property
     def multilingual(self) -> bool:
-        return "Multilingual" in self.name
+        return is_multilingual(self.name)
 
     @property
     def label(self) -> str:
@@ -133,14 +133,10 @@ def _gender_hint(role: str) -> Optional[str]:
 
 
 def fallback() -> Catalog:
-    """A small offline catalogue: the curated audiobook voices plus the German course cast."""
+    """A small offline catalogue: the curated audiobook voices."""
     voices: Dict[str, Voice] = {}
     for name in PREFERRED_VOICES.values():
         voices[name] = Voice(name, "Female", name.rsplit("-", 1)[0], name.rsplit("-", 1)[0])
-    for role, spec in DEFAULT_VOICES.items():
-        gender = "Female" if role.startswith(("Female", "Child")) else "Male"
-        voices.setdefault(spec.voice, Voice(spec.voice, gender, spec.voice.rsplit("-", 1)[0],
-                                            spec.voice.rsplit("-", 1)[0]))
     return Catalog(voices.values(), offline=True)
 
 

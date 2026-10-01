@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, List, Mapping, Optional, Tuple, Union
 
-from .voices import DEFAULT_VOICES, PROSODY_KEYS, VoiceSpec, validate_prosody
+from .voices import PROSODY_KEYS, VoiceSpec, validate_prosody
 
 # Named line modifiers: name -> (rate %, pitch Hz, volume %) deltas relative to the role's voice.
 # Only tags rated worthwhile in the German course's prosody study are here; fast/soft/loud were dropped
@@ -99,10 +99,11 @@ def parse_text(
 ) -> Script:
     """Parse *text*. Collects every problem and raises one ScriptError listing them all.
 
+    There is no built-in cast: every role must be mapped by *base_voices* or the @voices block.
     *adjust_voice(role, spec)* runs on every role's voice after the @voices block is merged and
     before line modifiers, so a caller's per-speaker choices can win over the file's block.
     """
-    voices: Dict[str, VoiceSpec] = dict(DEFAULT_VOICES if base_voices is None else base_voices)
+    voices: Dict[str, VoiceSpec] = dict(base_voices or {})
     file_voices: Dict[str, VoiceSpec] = {}
     lexicon: Dict[str, str] = dict(base_lexicon or {})   # course lexicon; @lexicon entries win
     cast: Dict[str, List[str]] = {}

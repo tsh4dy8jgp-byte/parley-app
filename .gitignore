@@ -5,6 +5,11 @@ __pycache__/
 .venv/
 .DS_Store
 
+# App builds (packaging/build.py)
+build/
+dist/
+*.dmg
+
 # Render outputs and caches
 out/
 .dialog_tts_cache/
@@ -12,5 +17,5 @@ out/
 *.wav
 *.zip
 
-# Book inputs dropped in the repo root (lessons and fixtures live in subfolders)
+# Book inputs dropped in the repo root (test fixtures live in tests/)
 /*.txt

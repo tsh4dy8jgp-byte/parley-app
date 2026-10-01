@@ -25,6 +25,7 @@ gui = [                                      # Parley desktop window (parley.py)
     "audioop-lts; python_version>='3.13'",
 ]
 dev = ["pytest>=7"]
+build = ["pyinstaller>=6.16", "pillow"]      # packaging/build.py; Pillow turns the .ico into .icns
 
 [project.scripts]
 audiobook = "parley.audiobook.cli:main"

@@ -30,6 +30,20 @@ PREFERRED_VOICES = {
     "nl": "nl-NL-ColetteNeural",
 }
 
+# *Multilingual* voices guess the language of every request, so their pronunciation is unreliable
+# in any language, worst on short lines. Every place that uses a voice warns about them.
+MULTILINGUAL_RISK = ("it guesses the language of each line, so its pronunciation may be messy, "
+                     "especially on short lines; a single-language voice is safer")
+
+
+def is_multilingual(voice: str) -> bool:
+    return "Multilingual" in voice
+
+
+def multilingual_warning(who: str, voice: str) -> str:
+    """The warning for *who* (e.g. "role A", "the narrator") using a *Multilingual* voice."""
+    return f"warning: {who} uses multilingual voice {voice}; {MULTILINGUAL_RISK}"
+
 
 async def resolve_voice(language: str, gender: Optional[str] = None) -> str:
     """Return a voice short name for *language* (e.g. ``en``, ``pt-BR``).

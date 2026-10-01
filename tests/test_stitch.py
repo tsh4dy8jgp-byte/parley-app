@@ -11,6 +11,15 @@ from parley.dialog_tts.tts import CachedBackend
 
 from conftest import tone_wav
 
+VOICES = """\
+@voices
+Narrator = de-CH-JanNeural   rate=-10%
+Male1 = de-AT-JonasNeural
+Male2 = de-DE-ConradNeural
+Male3 = de-DE-KillianNeural
+@end
+"""
+
 SCRIPT = """\
 @voices
 Narrator = de-DE-FlorianMultilingualNeural
@@ -60,7 +69,7 @@ def test_configurable_gaps():
 
 
 def test_shadow_and_repeat():
-    s = parse_text("[Narrator] T.\n[Male1 repeat=2] Hallo.\n[Male2] Servus.\n")
+    s = parse_text(VOICES + "[Narrator] T.\n[Male1 repeat=2] Hallo.\n[Male2] Servus.\n")
     tl = plan_timeline(s.segments, [400, 1000, 500], Gaps(lead_ms=0, tail_ms=0, shadow_factor=1.3))
     assert layout(tl) == [
         ("clip", 0, 400),             # no shadow after the narrator
@@ -92,7 +101,7 @@ def test_trim_silence():
 
 
 def test_srt_format():
-    s = parse_text("# Cast: Kellner = Male3\n[Male3] Grüß Gott!\n")
+    s = parse_text("# Cast: Kellner = Male3\n" + VOICES + "[Male3] Grüß Gott!\n")
     tl = plan_timeline(s.segments, [1234], Gaps(lead_ms=3_725_500))
     assert to_srt(tl.cues, s.label) == "1\n01:02:05,500 --> 01:02:06,734\nKellner: Grüß Gott!\n"
 
@@ -140,7 +149,7 @@ def test_cache_reuse_and_partial_rerender(tmp_path, fake):
 
 
 def test_identical_lines_are_synthesised_once(tmp_path, fake):
-    s = parse_text("[Male1] Ja.\n[Male2] Nein.\n[Male1] Ja.\n", "b.txt")
+    s = parse_text(VOICES + "[Male1] Ja.\n[Male2] Nein.\n[Male1] Ja.\n", "b.txt")
     asyncio.run(render_scripts([s], CachedBackend(fake, tmp_path / "c"), tmp_path / "o", RenderOptions()))
     assert len(fake.calls) == 2
 
@@ -151,6 +160,6 @@ def test_album_tag_is_configurable(tmp_path, fake):
     s = parse_text(SCRIPT, str(tmp_path / "talk.tagged.txt"))
     backend = CachedBackend(fake, tmp_path / "c")
     asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions()))
-    assert mediainfo(str(tmp_path / "o/talk.mp3"))["TAG"]["album"] == "Deutsch im Ohr"
-    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions(album="Parley")))
     assert mediainfo(str(tmp_path / "o/talk.mp3"))["TAG"]["album"] == "Parley"
+    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions(album="Deutsch im Ohr")))
+    assert mediainfo(str(tmp_path / "o/talk.mp3"))["TAG"]["album"] == "Deutsch im Ohr"

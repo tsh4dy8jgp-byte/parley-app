@@ -15,11 +15,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from .audiobook.voices import is_multilingual, multilingual_warning
 from .dialog_tts.render import RenderOptions, render_scripts
 from .dialog_tts.script import _ROLE_NAME, _TAG_LINE, Script, ScriptError, load_lexicon, parse_text
 from .dialog_tts.stitch import Gaps
 from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend
-from .dialog_tts.voices import DEFAULT_VOICES, VoiceSpec, duplicate_voice_warnings
+from .dialog_tts.voices import VoiceSpec, duplicate_voice_warnings
 
 from .catalog import Catalog
 from .settings import Settings
@@ -71,19 +72,16 @@ def detect(text: str) -> Detection:
 
 
 def base_cast(settings: Settings, roles: List[str], catalog: Catalog) -> Dict[str, VoiceSpec]:
-    """Role -> voice before the Advanced tab's sliders: German course defaults, else automatic.
+    """Role -> voice before the Advanced tab's sliders: automatic for the language.
 
-    Roles without either (no voices for the language) are included only if a voice was picked.
+    Roles without one (no voices for the language) are included only if a voice was picked.
     """
-    german = settings.language.lower().startswith("de")
     # Cast over all roles so choosing B's voice never reshuffles the automatic voices of A and C.
     auto = catalog.auto_cast(settings.language, roles)
     cast: Dict[str, VoiceSpec] = {}
     for role in roles:
         sp = settings.speakers.get(role)
-        if german and role in DEFAULT_VOICES:
-            cast[role] = DEFAULT_VOICES[role]
-        elif role in auto:
+        if role in auto:
             cast[role] = auto[role]
         elif sp and sp.voice:
             cast[role] = VoiceSpec(sp.voice)
@@ -125,7 +123,7 @@ class Check:
 def parse(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None) -> Script:
     """Parse a dialogue with the app's cast; raises ScriptError (also for a bad lexicon file)."""
     roles = detect(text).roles
-    # Precedence, low to high: automatic / course defaults < the text's @voices block < Advanced tab.
+    # Precedence, low to high: automatic < the text's @voices block < Advanced tab.
     return parse_text(text, safe_name(settings.out_name),
                       base_voices=base_cast(settings, roles, catalog),
                       base_lexicon=lexicon_for(settings, source),
@@ -136,6 +134,13 @@ def parse(text: str, settings: Settings, catalog: Catalog, source: Optional[Path
 def validate(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None) -> Check:
     d = detect(text)
     check = Check(d)
+    if d.mode == "narration":
+        try:
+            voice = narrator_spec(settings, catalog).voice
+        except ValueError:          # no voice for the language; generating reports that
+            voice = ""
+        if is_multilingual(voice):
+            check.warnings = [multilingual_warning("the narrator", voice)]
     if d.mode != "dialogue":
         return check
     try:

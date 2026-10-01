@@ -20,7 +20,40 @@ pip install -e ".[gui]"     # the desktop app; `pip install -e .` is enough for 
 ```
 
 Dialogues also need ffmpeg on PATH (`brew install ffmpeg`, `sudo apt install ffmpeg` or
-`winget install Gyan.FFmpeg`).
+`winget install Gyan.FFmpeg`). The ready-made app below has it built in.
+
+## Ready-made app (macOS, Windows)
+
+`packaging/build.py` turns the desktop app into a program that needs no Python and has ffmpeg
+built in:
+
+- **macOS**: `Parley-<version>-macos-arm64.dmg` (`-macos-x64` for Intel Macs). Open it and drag
+  Parley to Applications.
+- **Windows**: `Parley-<version>-windows-x64.zip`. Unzip it anywhere and run `Parley\Parley.exe`.
+  Keep the folder together.
+
+Neither Apple nor Microsoft has signed these builds, so the first start needs one extra step.
+On macOS, open Parley, close the warning, then go to System Settings → Privacy & Security and
+click *Open Anyway*. On Windows, click *More info* → *Run anyway* in the SmartScreen window.
+
+To build it:
+
+```bash
+pip install -e ".[gui,build]"
+python packaging/build.py            # downloads ffmpeg once, builds, self-tests, writes dist/Parley-…
+python packaging/build.py --online   # the self-test also synthesizes one line (needs network)
+```
+
+PyInstaller only builds for the system it runs on. `.github/workflows/build.yml` builds for
+Windows, Apple Silicon and Intel Macs on GitHub. Run it from the Actions tab, or push a tag like
+`v0.1.0` to attach the three files to a release. `--ffmpeg-dir DIR` bundles your own portable
+ffmpeg and ffprobe instead of downloading them. A built app can check itself without opening a
+window: `Parley.app/Contents/MacOS/Parley --self-test report.txt` (Windows:
+`Parley.exe --self-test report.txt`).
+
+The app runs FFmpeg as a separate, unmodified program. The macOS build of FFmpeg is GPLv3 and the
+Windows build is LGPL. Their licenses and source links are in the app's `ffmpeg` folder
+(`NOTICE.txt`, `LICENSE.txt`).
 
 ## Desktop app (`parley.py`)
 
@@ -38,7 +71,8 @@ python parley.py                    # or: parley
   are removed. A `.md` file that is already a tagged dialogue is opened as it is.
 - **Standard tab**: language, narrator voice (Auto / Female / Male), the text editor and where to save.
   The line under the editor checks the text as you type. It shows the speakers and their voices,
-  or any problems with their line number, and problem lines are tinted.
+  or any problems with their line number, and problem lines are tinted. It also warns (⚠) when the
+  narrator or a speaker uses a `*Multilingual*` voice.
 - **Advanced tab**: a voice and speed / pitch / volume per speaker (▶ previews it), dialogue gaps,
   extra outputs (SRT, LRC, shadowing, slow version, clips, WAV), loudness, lexicon file,
   parallel requests, the cache, and Light / Dark theme.
@@ -49,7 +83,7 @@ python parley.py                    # or: parley
 Settings and the editor draft are kept in `~/.config/parley/`. Synthesised lines are cached in
 `~/.cache/parley/` (Advanced → Performance shows the size and has a button to clear it).
 Files written by the CLI work in the app and the other way round. Voices are decided in this order,
-lowest to highest: automatic (or the German course defaults) < the file's `@voices` block < what you
+lowest to highest: automatic for the chosen language < the file's `@voices` block < what you
 change in Advanced → Voices. A speaker you leave on Automatic keeps the file's voice, and the speed,
 pitch and volume sliders are added on top of whichever voice is used. (The CLI has no Advanced tab,
 so there the file's block wins as before.)
@@ -98,8 +132,8 @@ anything the Edge voice catalogue supports.
 ```python
 import asyncio
 from pathlib import Path
-from audiobook import build_audiobook
-from audiobook.voices import resolve_voice
+from parley.audiobook import build_audiobook
+from parley.audiobook.voices import resolve_voice
 
 async def make():
     voice = await resolve_voice("en")
@@ -114,11 +148,16 @@ asyncio.run(make())
 - Output is MP3 (24 kHz, 48 kbit/s mono). Edge TTS emits self-contained MP3
   streams, so chunk outputs are concatenated directly without re-encoding.
 - Tune `--concurrency` down if you hit throttling on very large books.
+- `*Multilingual*` voices guess the language of each line, so their pronunciation may be messy,
+  especially on short lines. `audiobook` prints a warning when the narrator is one.
 
 ## Multi-voice dialogues (`dialog_tts.py`)
 
 `dialog-tts` renders role-tagged dialogue files into MP3s where each role has its own edge-tts
 voice. It also writes subtitles, a shadowing version and a slow version. Dialogues need ffmpeg on PATH.
+To have a chat assistant write a script with you, paste the interview prompt in
+[prompts/spoken-piece-interview.md](prompts/spoken-piece-interview.md) into a new chat. It asks about
+style, cast, voices and accents first, then writes a script in this format.
 
 ```bash
 pip install -e ".[dialog]"          # plus ffmpeg on PATH
@@ -132,7 +171,8 @@ python dialog_tts.py render dialogue.tagged.txt -o out --srt --shadow --slow
 # several files (the glob is expanded by the tool, so quote it)
 python dialog_tts.py render "lessons/*.tagged.txt" -o out --srt
 
-# check that every voice a file uses exists (needs network)
+# list all voices (or one locale: --locale en-GB), or check that every voice a file uses
+# exists (needs network)
 python dialog_tts.py voices dialogue.tagged.txt
 ```
 
@@ -157,7 +197,8 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | option | default | meaning |
 |---|---|---|
 | `-o, --out DIR` | `out` | output folder |
-| `--voices FILE` | – | voices.yaml with role defaults |
+| `--voices FILE` | – | voices.yaml with role defaults (see below) |
+| `--lexicon FILE` | `lexicon.txt` next to each file | lexicon of `word = spoken form` lines |
 | `--continue-speaker` | off | untagged lines continue the previous speaker, instead of being an error |
 | `--gap-change MS` | 450 | silence between lines of different speakers |
 | `--gap-same MS` | 250 | silence between two lines of the same speaker |
@@ -166,6 +207,14 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | `--target X` | −16 LUFS / −20 dBFS | loudness target |
 | `--concurrency N` | 4 | parallel TTS requests |
 | `--cache-dir DIR` | `.dialog_tts_cache` | cache of synthesised lines |
+| `--album TEXT` | `Parley` | MP3 album tag |
+
+A `--voices` file maps roles to a voice name, or to a voice with prosody:
+
+```yaml
+Narrator: en-US-AndrewNeural
+A: {voice: en-GB-RyanNeural, rate: "-5%", pitch: "-2Hz"}
+```
 
 ### File format
 
@@ -192,7 +241,7 @@ Worcestershire = Wooster-sheer
 |---|---|
 | `# …` | comment. `# Cast: Name = Role; …` also sets the speaker labels in the subtitles. |
 | blank line | ignored |
-| `@voices … @end` | `Role = voice [rate=±N%] [pitch=±NHz] [volume=±N%]`. Optional: roles missing here come from `--voices` or the built-in defaults. |
+| `@voices … @end` | `Role = voice [rate=±N%] [pitch=±NHz] [volume=±N%]`. Roles missing here must come from `--voices`. There is no built-in cast, so an unmapped role is reported as an error. |
 | `@lexicon … @end` | `word = spoken form`. Every whole-word occurrence is sent to TTS respelled, but the subtitles keep the original spelling. A `lexicon.txt` next to the file applies too; the file's own entries win. |
 | `[Role] text` | one utterance. Role names are voice slots (`A`, `Male1`, `Narrator` …), not characters. |
 | `[Role mod …] text` | line modifiers: `slow` (rate −20 %), `repeat=N` (1–9, the same clip N times, 700 ms apart), and the raw overrides `rate=±N%`, `pitch=±NHz`, `volume=±N%` (added to the role's values). |
@@ -202,4 +251,5 @@ Worcestershire = Wooster-sheer
 The parser reports **every** problem with its line number before any TTS request is made:
 untagged text, a role missing from the voice map, an empty utterance, an unknown control tag or
 modifier, bad prosody values, a malformed `@voices` line, and an unclosed block. It also warns when
-two roles in one file would sound identical, and when a role uses a `*Multilingual*` voice.
+two roles in one file would sound identical, and when a role uses a `*Multilingual*` voice. Those
+guess the language of each line, so their pronunciation may be messy, especially on short lines.

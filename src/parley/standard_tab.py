@@ -232,6 +232,7 @@ class StandardTab(ctk.CTkFrame):
     def show_check(self, check: Check, catalog: Catalog, settings: Settings, narrator: str) -> None:
         d = check.detection
         self._first_problem = 0
+        warn = f"   ·   ⚠ {check.warnings[0].split(': ', 1)[-1]}" if check.warnings else ""
         if d.mode == "empty":
             self._status("", t.MUTED)
         elif check.problems:
@@ -244,13 +245,13 @@ class StandardTab(ctk.CTkFrame):
         elif d.mode == "narration":
             mins = estimate_minutes(d.words)
             length = f"about {mins:.0f} min" if mins >= 1 else "under a minute"
-            self._status(f"Narration · {d.words:,} words · {length} · voice {narrator}", t.MUTED)
+            self._status(f"Narration · {d.words:,} words · {length} · voice {narrator}{warn}",
+                         t.WARNING if warn else t.MUTED)
         else:
             cast = "   ".join(f"{role} → {_voice_label(catalog, spec.voice)}"
                               for role, spec in list(check.voices.items())[:6])
             more = f"   +{len(check.voices) - 6}" if len(check.voices) > 6 else ""
             lines = len(check.script.utterances) if check.script else 0
-            warn = f"   ·   ⚠ {check.warnings[0].split(': ', 1)[-1]}" if check.warnings else ""
             self._status(f"Dialogue · {len(check.voices)} speakers · {lines} lines   ·   {cast}{more}{warn}",
                          t.WARNING if warn else t.MUTED)
         self.highlight(check)
