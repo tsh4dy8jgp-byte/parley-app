@@ -253,3 +253,52 @@ untagged text, a role missing from the voice map, an empty utterance, an unknown
 modifier, bad prosody values, a malformed `@voices` line, and an unclosed block. It also warns when
 two roles in one file would sound identical, and when a role uses a `*Multilingual*` voice. Those
 guess the language of each line, so their pronunciation may be messy, especially on short lines.
+
+## Acknowledgements
+
+Parley is a thin layer over other people's work.
+
+- **[edge-tts](https://github.com/rany2/edge-tts)** by rany2 does all the speech synthesis. It
+  talks to the online service behind Microsoft Edge's Read Aloud and lists its voices. Parley would
+  not exist without it.
+- **Microsoft** makes the neural voices. Parley is not affiliated with or endorsed by Microsoft. The
+  voices come from an online service that Microsoft can change or switch off at any time.
+- **[Martin Riedl](https://ffmpeg.martin-riedl.de)** (macOS) and
+  **[BtbN](https://github.com/BtbN/FFmpeg-Builds)** (Windows) publish the portable FFmpeg builds
+  that the ready-made apps bundle.
+
+Parley is built on these projects. Each keeps its own license.
+
+| project | used for | license |
+|---|---|---|
+| [edge-tts](https://github.com/rany2/edge-tts) | speech synthesis and the voice list | LGPL-3.0 |
+| [FFmpeg](https://ffmpeg.org), with [LAME](https://lame.sourceforge.io) for MP3 | decoding, loudness measurement and encoding of dialogue audio | GPL-3.0 (macOS build), LGPL-2.1+ (Windows build) |
+| [pydub](https://github.com/jiaaro/pydub) | cutting, joining and exporting audio (through FFmpeg) | MIT |
+| [audioop-lts](https://github.com/AbstractUmbra/audioop) | the `audioop` module pydub needs on Python 3.13+ | PSF-2.0 |
+| [PyYAML](https://pyyaml.org) | `--voices` files | MIT |
+| [CustomTkinter](https://github.com/TomSchimansky/CustomTkinter) by Tom Schimansky | the desktop app's widgets and Light / Dark themes | MIT |
+| [tkinterdnd2](https://github.com/Eliav2/tkinterdnd2), wrapping [tkdnd](https://github.com/petasis/tkdnd) by Georgios Petasis | dropping files on the window | MIT, Tcl-style BSD |
+| [PyInstaller](https://pyinstaller.org) and [pyinstaller-hooks-contrib](https://github.com/pyinstaller/pyinstaller-hooks-contrib) | building the ready-made app | GPL-2.0+ with a bootloader exception; Apache-2.0 / GPL-2.0 |
+| [Pillow](https://python-pillow.org) | turning the `.ico` into `.icns` at build time | MIT-CMU |
+| [pytest](https://docs.pytest.org) | the tests | MIT |
+
+The ready-made apps also contain Python and Tcl/Tk, under their own licenses.
+
+## References
+
+The documents and standards the design follows:
+
+- **Voices and prosody.** Microsoft's [voice list](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/language-support?tabs=tts)
+  explains the voice names (`en-GB-RyanNeural`). Its [prosody docs](https://learn.microsoft.com/en-us/azure/ai-services/speech-service/speech-synthesis-markup-voice#adjust-prosody)
+  explain `rate`, `pitch` and `volume`. The service accepts one voice with these three values per
+  request and no custom SSML ([edge-tts on custom SSML](https://github.com/rany2/edge-tts#custom-ssml)),
+  which is why the file format has no emphasis or break tags.
+- **Loudness.** `--loudness lufs` matches voices by loudness in LUFS, as defined in
+  [ITU-R BS.1770](https://www.itu.int/rec/R-REC-BS.1770) and [EBU R 128](https://tech.ebu.ch/publications/r128),
+  and measures it with FFmpeg's [`ebur128` filter](https://ffmpeg.org/ffmpeg-filters.html#ebur128).
+  The −16 LUFS default and the −1 dB peak ceiling follow [AES TD1004](https://www.aes.org/technical/documents/AESTD1004_1_15_10.pdf),
+  the AES recommendation for streamed and downloaded audio.
+- **Shadowing.** The `--shadow` version leaves room to repeat each line aloud. The exercise is named
+  after [speech shadowing](https://en.wikipedia.org/wiki/Speech_shadowing).
+- **Subtitles.** [SubRip (`.srt`)](https://en.wikipedia.org/wiki/SubRip) and
+  [LRC (`.lrc`)](https://en.wikipedia.org/wiki/LRC_(file_format)).
