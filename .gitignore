@@ -1,0 +1,16 @@
+# Python / tooling
+__pycache__/
+*.egg-info/
+.pytest_cache/
+.venv/
+.DS_Store
+
+# Render outputs and caches
+out/
+.dialog_tts_cache/
+*.mp3
+*.wav
+*.zip
+
+# Book inputs dropped in the repo root (lessons and fixtures live in subfolders)
+/*.txt

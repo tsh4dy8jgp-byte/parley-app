@@ -1,0 +1,41 @@
+# Deutsch im Ohr · Lektion 02: Im Kaffeehaus (In the coffee house)
+# Cast: Kellner = Male3; David = Male2
+# Every text line starts with a role tag. [pause N] inserts N seconds of silence.
+
+@voices
+Narrator = de-CH-JanNeural   rate=-10%
+Male1    = de-AT-JonasNeural   rate=-5% pitch=-6Hz
+Female1  = de-AT-IngridNeural
+Male2    = de-DE-ConradNeural
+Female2  = de-DE-KatjaNeural
+Male3    = de-DE-KillianNeural
+Female3  = de-DE-AmalaNeural
+Female4  = de-DE-KatjaNeural   rate=-5% pitch=+10Hz
+Child1   = de-DE-AmalaNeural   rate=+5% pitch=+35Hz
+@end
+
+[Narrator] Lektion zwei. Im Kaffeehaus.
+[pause 1.5]
+[Male3] Grüß Gott! Bitte schön?
+[Male2] Eine Melange, bitte.
+[Male3] Gerne. Sonst noch etwas?
+[Male2] Ja. Ein Stück Strudel, bitte.
+[Male3] Apfelstrudel oder Topfenstrudel?
+[Male2] Apfelstrudel. Mit Schlagobers, bitte.
+[Male3] Bitte schön. Eine Melange, ein Apfelstrudel und ein Glas Wasser.
+[Male2] Danke. Was kostet das Wasser?
+[Male3] Nichts. Das Wasser ist gratis.
+[Male2] Wunderbar!
+[pause 2.0]
+[Narrator] Übung. Übersetzen Sie.
+[pause 1.0]
+[Narrator] Ein Glas Wasser, bitte.
+[pause 3.0]
+[Narrator] Eine Melange mit Schlagobers?
+[pause 3.0]
+[Narrator] Was kostet das?
+[pause 3.0]
+[Narrator] Das ist gratis.
+[pause 3.0]
+[Narrator] Danke schön, Herr Ober.
+[pause 3.0]
