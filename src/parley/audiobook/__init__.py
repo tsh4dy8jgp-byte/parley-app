@@ -3,4 +3,4 @@
 from .builder import build_audiobook
 
 __all__ = ["build_audiobook"]
-__version__ = "0.1.0"
+__version__ = "0.2.0"

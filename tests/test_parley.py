@@ -190,7 +190,7 @@ def test_render_options_mapping():
     s = st.Settings(gap_change=600, srt=True, slow=True, loudness="dbfs", target=-20.0)
     o = jobs.render_options(s)
     assert (o.gaps.change_ms, o.srt, o.slow, o.loudness, o.target) == (600, True, True, "dbfs", -20.0)
-    assert o.album == "Parley"
+    assert (o.tags.artist, o.tags.album, o.tags.title) == ("Parley", "Parley", "")
 
 
 def test_safe_name():
@@ -369,3 +369,31 @@ def test_engines_import_without_tk():
     src = Path(__file__).resolve().parents[1] / "src"   # cwd=src so the root parley.py can't shadow the package
     r = subprocess.run([sys.executable, "-c", code], cwd=src, capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_tags_from_settings_and_cover_check(tmp_path):
+    s = st.Settings(artist="Me", album="Book", genre="Audiobook", year="2024")
+    t = jobs.tags_for(s)
+    assert (t.artist, t.album, t.genre, t.year, t.title) == ("Me", "Book", "Audiobook", "2024", "")
+    assert jobs.cover_problem(s) is None
+    assert "not found" in jobs.cover_problem(st.Settings(cover=str(tmp_path / "x.png")))
+    (tmp_path / "x.gif").write_bytes(b"GIF")
+    assert ".jpg or .png" in jobs.cover_problem(st.Settings(cover=str(tmp_path / "x.gif")))
+
+
+def test_narration_mp3_gets_tags(tmp_path):
+    from mutagen.id3 import ID3
+
+    from parley.audiobook import builder
+
+    async def fake(*_a, **_k):
+        return b"\xff\xfb\x90\x00" + b"\x00" * 200
+    old, builder._synthesize_chunk = builder._synthesize_chunk, fake
+    try:
+        out = tmp_path / "book.mp3"
+        asyncio.run(builder.build_audiobook("Hello world.", "en-US-GuyNeural", out,
+                                            tags=jobs.tags_for(st.Settings(artist="Me"))))
+    finally:
+        builder._synthesize_chunk = old
+    t = ID3(out)
+    assert (t["TIT2"].text[0], t["TPE1"].text[0], t["TALB"].text[0]) == ("book", "Me", "Parley")

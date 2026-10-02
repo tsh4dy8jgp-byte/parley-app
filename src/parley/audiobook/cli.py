@@ -7,6 +7,7 @@ import asyncio
 import sys
 from pathlib import Path
 
+from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from .builder import build_audiobook, print_progress
 from .chunker import DEFAULT_CHUNK_SIZE
 from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
@@ -55,6 +56,7 @@ def build_parser() -> argparse.ArgumentParser:
         default=4,
         help="Parallel TTS requests (default: %(default)s).",
     )
+    add_tag_args(parser)
     parser.add_argument(
         "--list-voices",
         action="store_true",
@@ -83,6 +85,9 @@ async def run(args: argparse.Namespace) -> None:
     if not args.voice and not args.language:
         raise SystemExit("error: provide --language (e.g. -l en) or an explicit --voice")
 
+    tags = tags_from_args(args)
+    if problem := read_cover_error(tags):
+        raise SystemExit(f"error: {problem}")
     text = read_text(args.input)
     if not text.strip():
         raise SystemExit("error: input text is empty")
@@ -101,6 +106,7 @@ async def run(args: argparse.Namespace) -> None:
         pitch=args.pitch,
         max_chars=args.chunk_size,
         concurrency=args.concurrency,
+        tags=tags,
         on_progress=print_progress,
     )
     size_mb = output.stat().st_size / (1024 * 1024)

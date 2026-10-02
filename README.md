@@ -32,9 +32,21 @@ built in:
 - **Windows**: `Parley-<version>-windows-x64.zip`. Unzip it anywhere and run `Parley\Parley.exe`.
   Keep the folder together.
 
-Neither Apple nor Microsoft has signed these builds, so the first start needs one extra step.
+Builds are unsigned unless the maintainer has set up the signing secrets below (then they are signed,
+and on macOS notarized, and open without a warning). If a build is unsigned, the first start needs one extra step.
 On macOS, open Parley, close the warning, then go to System Settings → Privacy & Security and
 click *Open Anyway*. On Windows, click *More info* → *Run anyway* in the SmartScreen window.
+
+To sign the CI builds, add these repository secrets (Settings → Secrets and variables → Actions);
+each platform signs only if its secrets exist:
+
+- **macOS** (needs an Apple Developer Program membership, $99/year): `MACOS_CERT_P12` (base64 of a
+  "Developer ID Application" certificate exported as .p12), `MACOS_CERT_PASSWORD`,
+  `APPLE_SIGN_IDENTITY` (e.g. `Developer ID Application: Your Name (TEAMID)`), `APPLE_ID`,
+  `APPLE_TEAM_ID`, `APPLE_APP_PASSWORD` (app-specific password for notarization).
+- **Windows** (needs a code-signing certificate from a CA): `WIN_CERT_PFX` (base64 of the .pfx) and
+  `WIN_CERT_PASSWORD`. SmartScreen reputation builds up with downloads for standard certificates;
+  EV certificates are trusted at once.
 
 To build it:
 
@@ -207,7 +219,7 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | `--target X` | −16 LUFS / −20 dBFS | loudness target |
 | `--concurrency N` | 4 | parallel TTS requests |
 | `--cache-dir DIR` | `.dialog_tts_cache` | cache of synthesised lines |
-| `--album TEXT` | `Parley` | MP3 album tag |
+| `--title`, `--artist`, `--album`, `--album-artist`, `--genre`, `--year`, `--track`, `--comment`, `--cover FILE` | artist and album `Parley`, genre `Speech`; title = file name | MP3 (ID3) tags so a music app can sort and show the files; `audiobook` takes the same options |
 
 A `--voices` file maps roles to a voice name, or to a voice with prosody:
 

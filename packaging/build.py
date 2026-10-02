@@ -6,6 +6,11 @@
 
 PyInstaller cannot cross-compile: run this on macOS for the Mac app and on Windows for the .exe
 (.github/workflows/build.yml does both).
+
+Signing is optional and driven by environment variables; without them the build is unsigned.
+    macOS:   APPLE_SIGN_IDENTITY ("Developer ID Application: ..."), and for notarization
+             APPLE_ID, APPLE_TEAM_ID, APPLE_APP_PASSWORD (an app-specific password)
+    Windows: WIN_SIGN_PFX (path to a .pfx code-signing certificate), WIN_SIGN_PASSWORD
 """
 
 from __future__ import annotations
@@ -150,6 +155,32 @@ def self_test(program: Path, online: bool) -> None:
         raise SystemExit(f"self-test failed (exit {proc.returncode})")
 
 
+def sign_windows(exe: Path) -> None:
+    """Authenticode-sign the exe with signtool (Windows SDK, preinstalled on GitHub runners)."""
+    pfx, password = os.environ.get("WIN_SIGN_PFX"), os.environ.get("WIN_SIGN_PASSWORD", "")
+    if not pfx:
+        print("WIN_SIGN_PFX not set: leaving the exe unsigned")
+        return
+    signtool = shutil.which("signtool") or next(
+        iter(sorted(Path(r"C:\Program Files (x86)\Windows Kits\10\bin").glob(r"*\x64\signtool.exe"), reverse=True)), None)
+    if not signtool:
+        raise SystemExit("signtool.exe not found: install the Windows SDK")
+    _run(signtool, "sign", "/f", pfx, "/p", password, "/fd", "SHA256",
+         "/tr", "http://timestamp.digicert.com", "/td", "SHA256", "/d", "Parley", exe)
+    _run(signtool, "verify", "/pa", exe)
+
+
+def notarize(dmg: Path) -> None:
+    """Submit the dmg to Apple's notary service, wait, and staple the ticket."""
+    creds = [os.environ.get(k) for k in ("APPLE_ID", "APPLE_TEAM_ID", "APPLE_APP_PASSWORD")]
+    if not all(creds):
+        print("APPLE_ID / APPLE_TEAM_ID / APPLE_APP_PASSWORD not set: skipping notarization")
+        return
+    _run("xcrun", "notarytool", "submit", dmg, "--apple-id", creds[0], "--team-id", creds[1],
+         "--password", creds[2], "--wait")
+    _run("xcrun", "stapler", "staple", dmg)
+
+
 def package(t: str) -> Path:
     if sys.platform == "darwin":
         app = DIST / "Parley.app"
@@ -161,7 +192,11 @@ def package(t: str) -> Path:
         (stage / "Applications").symlink_to("/Applications")
         out = DIST / f"Parley-{VERSION}-{t}.dmg"
         _run("hdiutil", "create", "-volname", "Parley", "-srcfolder", stage, "-ov", "-format", "UDZO", out)
+        if os.environ.get("APPLE_SIGN_IDENTITY"):
+            _run("codesign", "--sign", os.environ["APPLE_SIGN_IDENTITY"], "--timestamp", out)
+            notarize(out)
         return out
+    sign_windows(DIST / "Parley" / f"Parley{EXE}")
     out = DIST / f"Parley-{VERSION}-{t}"
     return Path(shutil.make_archive(str(out), "zip", root_dir=DIST, base_dir="Parley"))
 

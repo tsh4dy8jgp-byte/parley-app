@@ -1,6 +1,7 @@
 # PyInstaller spec for the Parley desktop app. Run it through packaging/build.py, which first
 # puts ffmpeg + ffprobe in build/ffmpeg/. customtkinter and tkinterdnd2 data come from the
 # hooks in pyinstaller-hooks-contrib.
+import os
 import sys
 import tomllib
 from pathlib import Path
@@ -9,6 +10,10 @@ ROOT = Path(SPECPATH).parent
 FFMPEG = ROOT / "build" / "ffmpeg"
 ICON = str(ROOT / "src" / "parley" / "parley.ico")
 VERSION = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))["project"]["version"]
+
+# macOS signing: set APPLE_SIGN_IDENTITY (e.g. "Developer ID Application: Name (TEAMID)"). Unset = unsigned.
+SIGN_ID = os.environ.get("APPLE_SIGN_IDENTITY") or None
+ENTITLEMENTS = str(ROOT / "packaging" / "entitlements.plist") if SIGN_ID else None
 
 if not (FFMPEG / ("ffmpeg.exe" if sys.platform == "win32" else "ffmpeg")).is_file():
     raise SystemExit(f"{FFMPEG} has no ffmpeg: run packaging/build.py, not PyInstaller directly")
@@ -37,6 +42,8 @@ exe = EXE(
     console=False,
     upx=False,
     icon=ICON,
+    codesign_identity=SIGN_ID,
+    entitlements_file=ENTITLEMENTS,
 )
 coll = COLLECT(exe, a.binaries, a.datas, name="Parley", upx=False)
 
@@ -47,6 +54,8 @@ if sys.platform == "darwin":
         icon=ICON,                       # converted to .icns with Pillow
         bundle_identifier="app.parley.desktop",
         version=VERSION,
+        codesign_identity=SIGN_ID,
+        entitlements_file=ENTITLEMENTS,
         info_plist={
             "CFBundleDisplayName": "Parley",
             "CFBundleShortVersionString": VERSION,

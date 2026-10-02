@@ -171,8 +171,23 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         w.SliderRow(b, 1, "Target", m["target"], -30, -10, 1,
                     lambda v: f"{v:.0f} {'dBFS' if m['loudness'].get() == 'dbfs' else 'LUFS'}")
 
+        # File info ----------------------------------------------------------------------------
+        b = self._card(4, "File info", "MP3 tags so a music app can sort and show the files. Artist and album "
+                          "are on the Standard tab. Empty fields are left out.").body
+        b.grid_columnconfigure(1, weight=1)
+        for i, (key, text, hint) in enumerate([
+                ("title", "Title", "empty: the file name"), ("album_artist", "Album artist", ""),
+                ("genre", "Genre", ""), ("year", "Year", "e.g. 2025"),
+                ("track", "Track", "e.g. 3 or 3/12"), ("comment", "Comment", "")]):
+            w.label(b, text, width=150).grid(row=i, column=0, sticky="w", pady=3)
+            w.entry(b, m[key], placeholder_text=hint).grid(row=i, column=1, sticky="ew", padx=(8, 0), pady=3)
+        w.label(b, "Cover image", width=150).grid(row=6, column=0, sticky="w", pady=3)
+        w.PathPicker(b, m["cover"], kind="file", title="Cover image",
+                     filetypes=(("Images", "*.jpg *.jpeg *.png"), ("All files", "*")), clearable=True).grid(
+            row=6, column=1, sticky="ew", padx=(8, 0), pady=3)
+
         # Pronunciation & parsing --------------------------------------------------------------
-        b = self._card(4, "Pronunciation & parsing").body
+        b = self._card(5, "Pronunciation & parsing").body
         w.label(b, "Lexicon file", width=150).grid(row=0, column=0, sticky="w")
         w.PathPicker(b, m["lexicon"], kind="file", title="Lexicon (word = spoken form)",
                      filetypes=(("Text", "*.txt"), ("All files", "*")), clearable=True).grid(
@@ -183,7 +198,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
             row=2, column=0, columnspan=3, sticky="w")
 
         # Performance --------------------------------------------------------------------------
-        b = self._card(5, "Performance").body
+        b = self._card(6, "Performance").body
         w.SliderRow(b, 0, "Parallel requests", m["concurrency"], 1, 8, 1, lambda v: f"{v:.0f}")
         w.SliderRow(b, 1, "Narration chunk", m["chunk_size"], 500, 5000, 250, lambda v: f"{v:,.0f} chars")
         w.label(b, "Cache folder", width=150).grid(row=2, column=0, sticky="w", pady=(6, 0))
@@ -196,7 +211,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         w.ghost(cache, "Clear cache", self.clear_cache).grid(row=0, column=1, padx=(12, 0))
 
         # Appearance ---------------------------------------------------------------------------
-        b = self._card(6, "Appearance").body
+        b = self._card(7, "Appearance").body
         w.label(b, "Theme", width=150).grid(row=0, column=0, sticky="w")
         w.segmented(b, ["System", "Light", "Dark"], variable=m["appearance"]).grid(row=0, column=1, sticky="w",
                                                                                    padx=(8, 0))
