@@ -10,6 +10,7 @@ import time
 from pathlib import Path
 from typing import List
 
+from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from .render import RenderOptions, render_scripts
 from .script import Script, ScriptError, load_lexicon, parse_file
 from .stitch import Gaps
@@ -46,7 +47,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--target", type=float, help="loudness target (default -16 LUFS / -20 dBFS)")
     r.add_argument("--concurrency", type=int, default=4, help="parallel TTS requests (%(default)s)")
     r.add_argument("--cache-dir", default=".dialog_tts_cache", help="TTS cache folder (%(default)s)")
-    r.add_argument("--album", default="Parley", help="mp3 album tag (%(default)s)")
+    add_tag_args(r)
 
     v = sub.add_parser("voices", help="list edge-tts voices and check files' voice mapping")
     v.add_argument("files", nargs="*", help="tagged files to check")
@@ -124,8 +125,10 @@ def cmd_render(a: argparse.Namespace) -> None:
     opts = RenderOptions(
         gaps=Gaps(change_ms=a.gap_change, same_ms=a.gap_same, repeat_ms=a.gap_repeat),
         shadow_factor=a.shadow_factor, shadow=a.shadow, slow=a.slow, srt=a.srt, lrc=a.lrc,
-        clips=a.clips, wav=a.wav, loudness=a.loudness, target=target, album=a.album,
+        clips=a.clips, wav=a.wav, loudness=a.loudness, target=target, tags=tags_from_args(a),
     )
+    if (problem := read_cover_error(opts.tags)):
+        raise SystemExit(f"error: {problem}")
     backend = CachedBackend(EdgeBackend(concurrency=a.concurrency), Path(a.cache_dir))
     t0 = time.perf_counter()
     written = asyncio.run(render_scripts(scripts, backend, Path(a.out), opts, _progress))

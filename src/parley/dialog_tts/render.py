@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Sequence, Tuple
 
+from ..mp3tags import Tags, write_tags
 from .script import SLOW_DELTA, Script
 from .stitch import Gaps, assemble, clip_ms, decode, finalize, plan_timeline, role_gains, trim_silence
 from .subtitles import to_lrc, to_srt
@@ -28,7 +29,12 @@ class RenderOptions:
     loudness: str = "lufs"          # "lufs" or "dbfs"
     target: float = -16.0           # LUFS target (or dBFS target in dbfs mode)
     bitrate: str = "64k"
-    album: str = "Parley"           # mp3 album tag
+    tags: Tags = field(default_factory=Tags)   # mp3 tags; the title defaults to the file name
+
+
+# Title of each variant: (default, suffix). A title the user typed gets a readable suffix instead.
+_TITLE = {"": lambda stem: (stem, ""), ".shadow": lambda stem: (f"{stem}.shadow", " (shadow)"),
+          ".slow": lambda stem: (f"{stem}.slow", " (slow)")}
 
 
 def jobs_for(script: Script, opts: RenderOptions) -> List[Job]:
@@ -74,8 +80,8 @@ def render_outputs(script: Script, audio: Dict[Job, bytes], fmt: str, out_dir: P
         def out(ext: str, name: str = name) -> Path:  # not with_suffix(): name contains dots
             return out_dir / f"{name}{ext}"
 
-        mix.export(out(".mp3"), format="mp3", bitrate=opts.bitrate,
-                   tags={"title": name, "album": opts.album})
+        mix.export(out(".mp3"), format="mp3", bitrate=opts.bitrate)
+        write_tags(out(".mp3"), opts.tags.with_title(*_TITLE[suffix](stem)))
         written.append((out(".mp3"), tl.total_ms))
         if opts.wav:
             mix.export(out(".wav"), format="wav")

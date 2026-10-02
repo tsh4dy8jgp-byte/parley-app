@@ -219,7 +219,7 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | `--target X` | −16 LUFS / −20 dBFS | loudness target |
 | `--concurrency N` | 4 | parallel TTS requests |
 | `--cache-dir DIR` | `.dialog_tts_cache` | cache of synthesised lines |
-| `--album TEXT` | `Parley` | MP3 album tag |
+| `--title`, `--artist`, `--album`, `--album-artist`, `--genre`, `--year`, `--track`, `--comment`, `--cover FILE` | artist and album `Parley`, genre `Speech`; title = file name | MP3 (ID3) tags so a music app can sort and show the files; `audiobook` takes the same options |
 
 A `--voices` file maps roles to a voice name, or to a voice with prosody:
 

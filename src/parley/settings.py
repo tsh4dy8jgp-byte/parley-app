@@ -12,6 +12,7 @@ from typing import Dict, Optional, Union
 
 from .audiobook.chunker import DEFAULT_CHUNK_SIZE
 from .dialog_tts.voices import VoiceSpec
+from .mp3tags import DEFAULT_ALBUM, DEFAULT_ARTIST, DEFAULT_GENRE
 
 CONFIG_DIR = Path(os.environ.get("PARLEY_HOME") or Path.home() / ".config" / "parley")
 CACHE_DIR = Path.home() / ".cache" / "parley"
@@ -52,6 +53,8 @@ class Settings:
     gender: str = "Auto"                 # narrator preference: Auto | Female | Male
     out_dir: str = str(Path.home() / "Parley")
     out_name: str = "untitled"
+    artist: str = DEFAULT_ARTIST         # MP3 tags; the title is the file name unless set in Advanced
+    album: str = DEFAULT_ALBUM
     # Voices
     narrator: Speaker = field(default_factory=Speaker)
     speakers: Dict[str, Speaker] = field(default_factory=dict)
@@ -70,6 +73,14 @@ class Settings:
     # Sound
     loudness: str = "lufs"               # lufs | dbfs
     target: float = -16.0
+    # File info (MP3 tags beyond artist and album)
+    title: str = ""
+    album_artist: str = ""
+    genre: str = DEFAULT_GENRE
+    year: str = ""
+    track: str = ""
+    comment: str = ""
+    cover: str = ""
     # Pronunciation & parsing
     lexicon: str = ""
     continue_speaker: bool = False

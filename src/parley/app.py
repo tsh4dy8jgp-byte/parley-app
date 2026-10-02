@@ -372,6 +372,10 @@ class ParleyApp(*_BASES):
                 self.standard.goto_line(line)
                 self.set_status(f"Fix the problems in the text first{f' (line {line})' if line else ''}.", "error")
                 return
+        if (problem := jobs.cover_problem(s)):
+            self.tabs.set("Advanced")
+            self.set_status(f"Cover image: {problem}", "error")
+            return
         out_dir = Path(s.out_dir).expanduser()
         try:
             out_dir.mkdir(parents=True, exist_ok=True)

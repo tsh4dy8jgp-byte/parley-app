@@ -154,12 +154,26 @@ def test_identical_lines_are_synthesised_once(tmp_path, fake):
     assert len(fake.calls) == 2
 
 
-def test_album_tag_is_configurable(tmp_path, fake):
-    from pydub.utils import mediainfo
+def test_tags_default_and_configurable(tmp_path, fake):
+    from mutagen.id3 import ID3
+
+    from parley.mp3tags import Tags
 
     s = parse_text(SCRIPT, str(tmp_path / "talk.tagged.txt"))
     backend = CachedBackend(fake, tmp_path / "c")
-    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions()))
-    assert mediainfo(str(tmp_path / "o/talk.mp3"))["TAG"]["album"] == "Parley"
-    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions(album="Deutsch im Ohr")))
-    assert mediainfo(str(tmp_path / "o/talk.mp3"))["TAG"]["album"] == "Deutsch im Ohr"
+    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions(shadow=True)))
+    t = ID3(tmp_path / "o/talk.mp3")
+    assert (t["TIT2"].text[0], t["TPE1"].text[0], t["TALB"].text[0], t["TCON"].text[0]) == (
+        "talk", "Parley", "Parley", "Speech")
+    assert ID3(tmp_path / "o/talk.shadow.mp3")["TIT2"].text[0] == "talk.shadow"
+    cover = tmp_path / "c.png"
+    cover.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    tags = Tags(title="Lesson 2", artist="Anna", album="Deutsch im Ohr", year="2025", track="2/10",
+                comment="hi", album_artist="Course", cover=str(cover))
+    asyncio.run(render_scripts([s], backend, tmp_path / "o", RenderOptions(tags=tags, shadow=True)))
+    t = ID3(tmp_path / "o/talk.mp3")
+    assert [t[k].text[0] for k in ("TIT2", "TPE1", "TALB", "TPE2", "TRCK")] == [
+        "Lesson 2", "Anna", "Deutsch im Ohr", "Course", "2/10"]
+    assert str(t["TDRC"].text[0]) == "2025" and t["COMM::eng"].text[0] == "hi"
+    assert t["APIC:Cover"].mime == "image/png"
+    assert ID3(tmp_path / "o/talk.shadow.mp3")["TIT2"].text[0] == "Lesson 2 (shadow)"

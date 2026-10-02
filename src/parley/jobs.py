@@ -23,10 +23,10 @@ from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend
 from .dialog_tts.voices import VoiceSpec, duplicate_voice_warnings
 
 from .catalog import Catalog
+from .mp3tags import Tags, read_cover_error
 from .settings import Settings
 
 Progress = Callable[[int, int], None]
-ALBUM = "Parley"
 WORDS_PER_MINUTE = 150
 
 
@@ -222,12 +222,23 @@ def _languages(names: List[str], catalog: Catalog) -> str:
     return ", ".join(out)
 
 
+def tags_for(settings: Settings) -> Tags:
+    """MP3 tags from the settings; the title stays empty (= the file name) unless one was set."""
+    return Tags(title=settings.title, artist=settings.artist, album=settings.album,
+                album_artist=settings.album_artist, genre=settings.genre, year=settings.year,
+                track=settings.track, comment=settings.comment, cover=settings.cover)
+
+
+def cover_problem(settings: Settings) -> Optional[str]:
+    return read_cover_error(tags_for(settings))
+
+
 def render_options(settings: Settings) -> RenderOptions:
     return RenderOptions(
         gaps=Gaps(change_ms=settings.gap_change, same_ms=settings.gap_same, repeat_ms=settings.gap_repeat),
         shadow_factor=settings.shadow_factor, shadow=settings.shadow, slow=settings.slow,
         srt=settings.srt, lrc=settings.lrc, clips=settings.clips, wav=settings.wav,
-        loudness=settings.loudness, target=settings.target, album=ALBUM,
+        loudness=settings.loudness, target=settings.target, tags=tags_for(settings),
     )
 
 
@@ -278,7 +289,7 @@ async def run_narration(text: str, settings: Settings, catalog: Catalog,
     spec = narrator_spec(settings, catalog)
     out = Path(settings.out_dir).expanduser() / f"{safe_name(settings.out_name)}.mp3"
     await build_audiobook(text, spec.voice, out, rate=spec.rate, volume=spec.volume, pitch=spec.pitch,
-                          max_chars=settings.chunk_size, concurrency=settings.concurrency,
+                          max_chars=settings.chunk_size, concurrency=settings.concurrency, tags=tags_for(settings),
                           on_progress=on_progress)
     return [(out, 0)]
 

@@ -9,6 +9,7 @@ from typing import Callable, Optional
 
 import edge_tts
 
+from ..mp3tags import Tags, write_tags
 from .chunker import DEFAULT_CHUNK_SIZE, split_text
 
 MAX_RETRIES = 3
@@ -53,12 +54,14 @@ async def build_audiobook(
     pitch: str = "+0Hz",
     max_chars: int = DEFAULT_CHUNK_SIZE,
     concurrency: int = 4,
+    tags: Optional[Tags] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
 ) -> Path:
     """Convert *text* into an MP3 audiobook at *output_path*.
 
     Chunks are synthesized concurrently (bounded by *concurrency*) and
-    written to the output file in their original order. Edge TTS emits a
+    written to the output file in their original order. *tags* (if given) are
+    written as ID3 tags; an empty title becomes the file name. Edge TTS emits a
     self-contained MP3 stream per request, so streams can be concatenated
     directly.
     """
@@ -86,6 +89,8 @@ async def build_audiobook(
     with open(output_path, "wb") as handle:
         for _, audio in results:
             handle.write(audio)
+    if tags is not None:
+        write_tags(output_path, tags.with_title(output_path.stem))
     return output_path
 
 

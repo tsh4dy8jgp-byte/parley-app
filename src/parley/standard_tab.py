@@ -106,6 +106,12 @@ class StandardTab(ctk.CTkFrame):
         w.label(o, "File name", weight="bold").grid(row=0, column=2, sticky="w", padx=(16, 12))
         w.entry(o, app.model["out_name"], width=180).grid(row=0, column=3, sticky="ew")
         w.caption(o, ".mp3").grid(row=0, column=4, sticky="w", padx=(6, 0))
+        w.label(o, "Artist", weight="bold").grid(row=1, column=0, sticky="w", padx=(0, 12), pady=(10, 0))
+        w.entry(o, app.model["artist"]).grid(row=1, column=1, sticky="ew", pady=(10, 0))
+        w.label(o, "Album", weight="bold").grid(row=1, column=2, sticky="w", padx=(16, 12), pady=(10, 0))
+        w.entry(o, app.model["album"], width=180).grid(row=1, column=3, sticky="ew", pady=(10, 0))
+        w.caption(o, "Shown in your music app. More tags (genre, year, cover…) are in Advanced.").grid(
+            row=2, column=1, columnspan=3, sticky="w", pady=(4, 0))
 
         self.configure_tags()
 
