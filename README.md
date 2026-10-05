@@ -7,6 +7,8 @@ Parley turns text into speech with [edge-tts](https://pypi.org/project/edge-tts/
 
 - **The Parley desktop app** (`parley`): open or drop text and generate. Plain text becomes a
   single-voice audiobook, and text with speaker tags (`[A] Hello!`) becomes a multi-voice dialogue.
+  Both can play your own audio files (music, an anthem, archive radio) where the text says
+  `[sound Name]`.
 - **`audiobook`**: a command line tool that turns a large text + a language code into one MP3.
 - **`dialog-tts`**: a command line tool that renders role-tagged dialogue scripts into multi-voice
   MP3s with subtitles, shadowing and slow versions.
@@ -85,9 +87,10 @@ python parley.py                    # or: parley
   The line under the editor checks the text as you type. It shows the speakers and their voices,
   or any problems with their line number, and problem lines are tinted. It also warns (⚠) when the
   narrator or a speaker uses a `*Multilingual*` voice.
-- **Advanced tab**: a voice and speed / pitch / volume per speaker (▶ previews it), dialogue gaps,
-  extra outputs (SRT, LRC, shadowing, slow version, clips, WAV), loudness, lexicon file,
-  parallel requests, the cache, and Light / Dark theme.
+- **Advanced tab**: a voice and speed / pitch / volume per speaker (▶ previews it), the sounds
+  folder with the file found for each `[sound Name]` (or what is missing), dialogue gaps, extra
+  outputs (SRT, LRC, shadowing, slow version, clips, WAV), loudness, lexicon file, parallel requests,
+  the cache, and Light / Dark theme.
 - **Guide** (button or F1): how to write a dialogue for speakers A, B and C, with
   *Insert example dialogue* (English, German, French, Spanish or Russian, following the language).
 - Shortcuts: ⌘/Ctrl+Enter generate, Esc cancel, ⌘/Ctrl+O open, ⌘/Ctrl+S save text.
@@ -162,6 +165,9 @@ asyncio.run(make())
 - Tune `--concurrency` down if you hit throttling on very large books.
 - `*Multilingual*` voices guess the language of each line, so their pronunciation may be messy,
   especially on short lines. `audiobook` prints a warning when the narrator is one.
+- `audiobook` reads `[sound Name]` lines aloud as text (and warns about them). To play the audio
+  files, open the text in the Parley app, which mixes narration with sounds
+  (see [Music and sound inserts](#music-and-sound-inserts)).
 
 ## Multi-voice dialogues (`dialog_tts.py`)
 
@@ -204,6 +210,9 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | `dialogue_clips/NNN_Role.mp3` | `--clips` | each line trimmed and loudness-matched |
 | `.wav` next to each `.mp3` | `--wav` | uncompressed copy |
 
+Speech-only files are 24 kHz mono MP3s at 64 kbit/s. A file with `[sound Name]` inserts is mixed at
+48 kHz stereo and written at 128 kbit/s, so the music keeps its quality.
+
 ### Options
 
 | option | default | meaning |
@@ -211,6 +220,7 @@ The output name is cut at the first dot, so `dialogue.tagged.txt` becomes `dialo
 | `-o, --out DIR` | `out` | output folder |
 | `--voices FILE` | – | voices.yaml with role defaults (see below) |
 | `--lexicon FILE` | `lexicon.txt` next to each file | lexicon of `word = spoken form` lines |
+| `--sounds DIR` | `sounds/` next to each file | folder with the audio files for `[sound Name]` lines |
 | `--continue-speaker` | off | untagged lines continue the previous speaker, instead of being an error |
 | `--gap-change MS` | 450 | silence between lines of different speakers |
 | `--gap-same MS` | 250 | silence between two lines of the same speaker |
@@ -240,9 +250,12 @@ B        = en-US-AvaNeural
 @lexicon
 Worcestershire = Wooster-sheer
 @end
+@sounds
+Piano   volume=-6dB fade_out=2   # A piano plays in the corner
+@end
 
 [Narrator] At the restaurant.
-[pause 1.5]
+[sound Piano end=0:08]
 [A] Good evening! A table for one?
 [B] Yes, please. Is the {soup|soop} good today?
 [B slow repeat=2] Yes, please.
@@ -259,12 +272,60 @@ Worcestershire = Wooster-sheer
 | `[Role mod …] text` | line modifiers: `slow` (rate −20 %), `repeat=N` (1–9, the same clip N times, 700 ms apart), and the raw overrides `rate=±N%`, `pitch=±NHz`, `volume=±N%` (added to the role's values). |
 | `{shown\|spoken}` | inline respelling for one occurrence. |
 | `[pause N]` | N seconds of silence, alone on its line. It replaces the normal turn gap. |
+| `[sound Name opt …]` | plays the audio file for `Name`, alone on its line. See below. |
+| `@sounds … @end` | `Name [= file] [options] [# description]`: per-sound defaults and the subtitle text. |
 
 The parser reports **every** problem with its line number before any TTS request is made:
 untagged text, a role missing from the voice map, an empty utterance, an unknown control tag or
-modifier, bad prosody values, a malformed `@voices` line, and an unclosed block. It also warns when
+modifier, bad prosody values, a malformed `@voices` or `@sounds` line, an unclosed block, and a sound
+whose file is missing or whose `start`/`end` don't fit the file. It also warns when
 two roles in one file would sound identical, and when a role uses a `*Multilingual*` voice. Those
 guess the language of each line, so their pronunciation may be messy, especially on short lines.
+
+### Music and sound inserts
+
+A script can play audio files you supply between its lines: a song, an anthem, archive radio, an
+effect. The voices stop while an insert plays, and there is a speaker-change gap on each side of it.
+
+```text
+@sounds
+Anthem1                      fade_out=3            # Brass band plays the national anthem
+Radio1 = moon_landing.mp3    start=0:04 end=0:31   # Radio, 20 July 1969
+@end
+
+[Narrator] The crowd rose to its feet.
+[sound Anthem1 fade_in=1.5]
+[Narrator] Somewhere a radio crackled to life.
+[sound Radio1 volume=-3dB]
+```
+
+- **Files**: `[sound Anthem1]` plays `Anthem1.mp3` (or `.wav`, `.m4a`, `.aac`, `.ogg`, `.opus`,
+  `.flac`; the case of the name doesn't matter) from a folder named `sounds` next to the script.
+  `--sounds DIR` or the app's Advanced → Sounds picks another folder. `Name = file` in `@sounds`
+  names a file in that folder, or gives an absolute path.
+- **Options**, in `@sounds` for every use or on the tag for one use (the tag wins, option by option):
+
+  | option | meaning |
+  |---|---|
+  | `fade_in=S`, `fade_out=S` | fade over S seconds (up to 30) |
+  | `start=T`, `end=T` | play only that part: `12.5`, `1:05` or `1:05.5` |
+  | `volume=±NdB` | relative to the voices, −30 to +10 |
+
+- **Levels**: every insert is levelled to the loudness of the voices (and then shifted by `volume`),
+  but never raised so far that its peaks would pass −1 dBFS. Silence at the edges of the file is
+  trimmed, and a 10 ms fade stops a cut from clicking.
+- **Subtitles**: an insert gets a cue with its `#` description, like `♪ Brass band plays the national
+  anthem` (the name if there is none). The shadowing version adds no gap after an insert, and the
+  slow version plays it at its normal speed.
+- **Checks**: `--dry-run` lists every insert with its file and length, and reports a missing file, a
+  folder that doesn't exist, two files with the same name, or a `start`/`end` past the end of the file,
+  before any TTS request.
+- **Plain narration**: in the app, a text without speaker tags can have `[sound Name]`, `[pause N]`
+  and a `@sounds` block too. The prose between them is cut like an audiobook (Advanced → Narration
+  chunk) and read by the narrator voice, then mixed with the inserts into one MP3. This needs ffmpeg.
+
+The [interview prompt](prompts/spoken-piece-interview.md) asks about inserts, writes the
+`@sounds` block, and ends with the list of files to provide.
 
 ## Acknowledgements
 

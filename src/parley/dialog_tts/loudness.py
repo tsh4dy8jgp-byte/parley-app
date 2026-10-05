@@ -23,9 +23,13 @@ def measure_lufs(seg) -> Optional[float]:
 
     R128 needs 400 ms blocks, so short audio (a one-word line) is looped to 1 s first;
     looping does not change its loudness, and every role is measured the same way.
+    Stereo is measured on its mono downmix, so music compares like for like with the mono speech
+    and a stereo file comes out as loud as a speech-only one.
     """
     if len(seg) == 0:
         return None
+    if seg.channels > 1:
+        seg = seg.set_channels(1)
     if len(seg) < 1000:
         seg = seg * (1000 // len(seg) + 1)
     buf = io.BytesIO()

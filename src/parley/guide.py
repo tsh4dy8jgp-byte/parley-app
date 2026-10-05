@@ -41,6 +41,14 @@ STEPS = [
          "Write {shown|spoken} to keep one spelling in the subtitles but say another. For a word "
          "that comes up often, list it once in a @lexicon block.",
          "@lexicon\nSQL = sequel\n@end\n[A] I love {GIF|jif} files and SQL."),
+    Step("Add music and sounds",
+         "Put [sound Name] on its own line where a recording should play, and save a file with that "
+         "name in a folder called sounds next to your text (or pick a folder in Advanced → Sounds): "
+         "Anthem1.mp3, .wav, .m4a, .ogg or .flac. It is levelled to the voices; fade_in, fade_out, "
+         "start, end and volume shape it. A @sounds block sets them once, and its # note becomes "
+         "the subtitle. Plain narration can have sounds too.",
+         "@sounds\nAnthem1   fade_out=3   # The band plays the anthem\n@end\n[A] Listen, they're playing it.\n"
+         "[sound Anthem1 fade_in=1 end=1:10]\n[B] Goosebumps, every time."),
     Step("Name the characters",
          "Subtitles show the speaker tag by default. A Cast comment gives the speakers real names.",
          "# Cast: Anna = A; Ben = B; Clara = C\n[A] I'm Anna.\n[B] And I'm Ben."),

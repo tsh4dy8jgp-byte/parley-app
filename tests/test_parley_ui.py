@@ -197,3 +197,28 @@ def test_language_mismatch_offers_one_click_fix(de_app):
     assert de_app.model["language"].get() == "de-DE"
     assert language_state(de_app) == ("normal", "German (Germany)", "", "")
     assert de_app.check.voices["B"].voice.startswith("de-")
+
+
+def test_sounds_card_lists_found_and_missing_sounds(app, tmp_path, monkeypatch):
+    from conftest import write_sound
+
+    (tmp_path / "story.txt").write_text("It was late.\n[sound Rain]\n[sound Bell]\nThe end.", encoding="utf-8")
+    write_sound(tmp_path / "sounds", "Rain.wav")
+    app.open_paths([tmp_path / "story.txt"])
+    assert app.badge.cget("text").strip() == "1 problem"                  # Bell is missing
+    texts = [[c.cget("text") for c in row.winfo_children()] for row in app.advanced.sound_rows]
+    assert texts[0][0] == "Rain" and texts[0][2].startswith("Rain.wav · 0:02")
+    assert texts[1][0] == "Bell" and texts[1][2] == "✕ put Bell.mp3 (or .wav, .m4a, .ogg, .flac) in the sounds folder"
+    assert str(tmp_path / "sounds") in app.advanced.sounds_note.cget("text")
+    write_sound(tmp_path / "sounds", "Bell.wav")
+    app.validate_now()                                                   # what ↻ Check again does
+    assert app.badge.cget("text").strip() == "Narration · 2 sounds"
+    assert "· 2 sounds ·" in app.standard.status.cget("text")
+    assert [str(i) for i in app.standard.editor._textbox.tag_ranges("speaker")] == ["2.0", "2.12", "3.0", "3.12"]
+    opened = []
+    monkeypatch.setattr(ui.system, "open_path", opened.append)
+    app.advanced.open_sound_folder()
+    assert opened == [tmp_path / "sounds"]
+    app.standard.set_text("Plain prose.")
+    app.validate_now()
+    assert app.advanced.sound_rows == [] and app.advanced.no_sounds.winfo_manager() == "grid"

@@ -4,12 +4,13 @@ from __future__ import annotations
 
 import io
 from dataclasses import dataclass, field
-from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple
+from typing import Dict, FrozenSet, List, Optional, Sequence, Tuple, Union
 
-from .script import Pause, Segment, Utterance
+from .script import Pause, Segment, Sound, Utterance
 from .voices import NARRATOR_ROLES
 
 FRAME_RATE = 24000  # edge-tts native rate
+HIFI = (48000, 2)   # (rate, channels) of a file with sound inserts; 48 kHz keeps whole bytes per ms
 
 
 @dataclass(frozen=True)
@@ -27,15 +28,15 @@ class Gaps:
 class Placed:
     start_ms: int
     dur_ms: int
-    utt_index: Optional[int] = None   # index into the utterance list, None = silence
-    why: str = ""                     # lead, gap-change, gap-same, pause, repeat, shadow, tail
+    clip_index: Optional[int] = None  # index into the clips (utterances and sounds in order), None = silence
+    why: str = ""                     # lead, gap-change, gap-same, pause, clip, sound, repeat, shadow, tail
 
 
 @dataclass(frozen=True)
 class Cue:
     start_ms: int
     end_ms: int
-    utterance: Utterance
+    segment: Union[Utterance, Sound]
 
 
 @dataclass
@@ -46,7 +47,8 @@ class Timeline:
 
 
 def plan_timeline(segments: Sequence[Segment], durations_ms: Sequence[int], gaps: Gaps) -> Timeline:
-    """Lay out *segments* in time. durations_ms[i] is the length of the i-th utterance clip."""
+    """Lay out *segments* in time. durations_ms[i] is the length of the i-th clip: the utterances and
+    sounds of *segments*, in order. A sound gets the speaker-change gap on both sides."""
     tl = Timeline()
     pos = 0
 
@@ -57,12 +59,21 @@ def plan_timeline(segments: Sequence[Segment], durations_ms: Sequence[int], gaps
             pos += dur
 
     put(gaps.lead_ms, "lead")
-    prev_role: Optional[str] = None     # role of the previous item if it was an utterance
+    prev_role: Optional[str] = None     # role of the previous utterance, a marker after a sound, None after a pause
     u = 0
     for seg in segments:
         if isinstance(seg, Pause):
             put(round(seg.seconds * 1000), "pause")
             prev_role = None
+            continue
+        if isinstance(seg, Sound):
+            if prev_role is not None:
+                put(gaps.change_ms, "gap-change")
+            start = pos
+            put(durations_ms[u], "sound", u)
+            tl.cues.append(Cue(start, pos, seg))
+            prev_role = f"\0sound{u}"          # equal to no role, so the next item gets a change gap
+            u += 1
             continue
         if prev_role is not None:
             same = seg.role == prev_role
@@ -85,11 +96,12 @@ def plan_timeline(segments: Sequence[Segment], durations_ms: Sequence[int], gaps
 
 # ---------------------------------------------------------------- audio side
 
-def decode(data: bytes, fmt: str):
+def decode(data: bytes, fmt: str, rate: int = FRAME_RATE, channels: int = 1):
+    """Decode a TTS clip to 16-bit PCM at *rate* / *channels* (ffmpeg resamples where it decodes)."""
     from pydub import AudioSegment
 
-    seg = AudioSegment.from_file(io.BytesIO(data), format=fmt)
-    return seg.set_frame_rate(FRAME_RATE).set_channels(1).set_sample_width(2)
+    seg = AudioSegment.from_file(io.BytesIO(data), format=fmt, parameters=["-ar", str(rate), "-ac", str(channels)])
+    return seg.set_frame_rate(rate).set_channels(channels).set_sample_width(2)
 
 
 def trim_silence(seg, threshold_dbfs: float = -45.0, keep_ms: int = 40):
@@ -106,23 +118,27 @@ def trim_silence(seg, threshold_dbfs: float = -45.0, keep_ms: int = 40):
 
 
 def assemble(tl: Timeline, clips: Sequence) -> "AudioSegment":  # noqa: F821
-    """Render the timeline to one AudioSegment (joined as raw PCM for exact timing)."""
+    """Render the timeline to one AudioSegment (joined as raw PCM for exact timing).
+
+    Every clip must have the same format (16-bit; 24 kHz mono, or HIFI when the script has sounds).
+    """
     from pydub import AudioSegment
 
-    bytes_per_ms = FRAME_RATE * 2 // 1000
+    rate, channels = (clips[0].frame_rate, clips[0].channels) if clips else (FRAME_RATE, 1)
+    bytes_per_ms = rate * 2 * channels // 1000
     parts: List[bytes] = []
     for item in tl.items:
-        if item.utt_index is None:
+        if item.clip_index is None:
             parts.append(b"\x00" * (item.dur_ms * bytes_per_ms))
         else:
-            raw = clips[item.utt_index].raw_data
+            raw = clips[item.clip_index].raw_data
             want = item.dur_ms * bytes_per_ms   # clip lengths are rounded to whole ms
             parts.append(raw[:want].ljust(want, b"\x00"))
-    return AudioSegment(data=b"".join(parts), sample_width=2, frame_rate=FRAME_RATE, channels=1)
+    return AudioSegment(data=b"".join(parts), sample_width=2, frame_rate=rate, channels=channels)
 
 
 def clip_ms(seg) -> int:
-    return int(len(seg.raw_data) // (FRAME_RATE * 2 // 1000))
+    return int(len(seg.raw_data) // (seg.frame_rate * seg.sample_width * seg.channels // 1000))
 
 
 def role_gains(clips: Sequence, roles: Sequence[str], target: float, mode: str = "lufs") -> Dict[str, float]:

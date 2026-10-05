@@ -11,13 +11,16 @@ import queue
 import re
 import threading
 from collections import Counter
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 
+from .audiobook.chunker import split_text
 from .audiobook.voices import is_multilingual, multilingual_warning
 from .dialog_tts.render import RenderOptions, render_scripts
-from .dialog_tts.script import _ROLE_NAME, _TAG_LINE, Script, ScriptError, load_lexicon, parse_text
+from .dialog_tts.script import (_ROLE_NAME, _TAG_LINE, Script, ScriptError, load_lexicon, parse_narration,
+                                parse_text)
+from .dialog_tts.sounds import DEFAULT_DIR, SoundFile, attach_sounds, find_sounds
 from .dialog_tts.stitch import Gaps
 from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend
 from .dialog_tts.voices import VoiceSpec, duplicate_voice_warnings
@@ -36,15 +39,20 @@ class Detection:
     roles: List[str]           # speakers in order of first appearance
     words: int
     pinned: List[str] = field(default_factory=list)   # roles given a voice by a @voices block
+    sounds: List[str] = field(default_factory=list)   # [sound Name] names in order of first use
 
 
 _PINNED = re.compile(r"^([A-Za-z_]\w*)\s*=")
 
 
 def detect(text: str) -> Detection:
-    """Dialogue if any line starts with a speaker tag ([A] ..., [Anna slow] ...) or a @voices block."""
+    """Dialogue if any line starts with a speaker tag ([A] ..., [Anna slow] ...) or a @voices block.
+
+    [sound Name] lines and a @sounds block don't make a dialogue: plain narration can have them too.
+    """
     roles: Dict[str, None] = {}
     pinned: Dict[str, None] = {}
+    sounds: Dict[str, None] = {}
     dialogue = False
     block = None
     for line in text.splitlines():
@@ -58,17 +66,24 @@ def detect(text: str) -> Detection:
         if s in ("@voices", "@lexicon"):
             dialogue, block = True, s
             continue
+        if s == "@sounds":
+            block = s
+            continue
         m = _TAG_LINE.match(s)
         if not m or not m.group(1).split():
             continue
-        head = m.group(1).split()[0]
-        if head.lower() != "pause" and _ROLE_NAME.match(head):
+        tokens = m.group(1).split()
+        head = tokens[0]
+        if head.lower() == "sound":
+            if len(tokens) > 1:
+                sounds[tokens[1]] = None
+        elif head.lower() != "pause" and _ROLE_NAME.match(head):
             roles[head] = None
             dialogue = True
     words = len(text.split())
     if not words:
         return Detection("empty", [], 0)
-    return Detection("dialogue" if dialogue else "narration", list(roles), words, list(pinned))
+    return Detection("dialogue" if dialogue else "narration", list(roles), words, list(pinned), list(sounds))
 
 
 def base_cast(settings: Settings, roles: List[str], catalog: Catalog) -> Dict[str, VoiceSpec]:
@@ -118,17 +133,43 @@ class Check:
     warnings: List[str] = field(default_factory=list)
     voices: Dict[str, VoiceSpec] = field(default_factory=dict)       # role -> voice actually used
     script: Optional[Script] = None
+    sounds: List[SoundFile] = field(default_factory=list)            # what the sounds folder has for each name
 
 
-def parse(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None) -> Script:
-    """Parse a dialogue with the app's cast; raises ScriptError (also for a bad lexicon file)."""
+def sounds_folder(settings: Settings, source: Optional[Path]) -> Optional[Path]:
+    """The folder from Advanced → Sounds, else sounds/ next to the opened file (like the CLI)."""
+    if settings.sounds_dir:
+        return Path(settings.sounds_dir).expanduser()
+    return Path(source).parent / DEFAULT_DIR if source is not None else None
+
+
+def parse(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None,
+          attach: bool = True) -> Script:
+    """Parse a dialogue with the app's cast; raises ScriptError (also for a bad lexicon file or a
+    sound whose file is missing, unless *attach* is False)."""
     roles = detect(text).roles
     # Precedence, low to high: automatic < the text's @voices block < Advanced tab.
-    return parse_text(text, safe_name(settings.out_name),
-                      base_voices=base_cast(settings, roles, catalog),
-                      base_lexicon=lexicon_for(settings, source),
-                      continue_speaker=settings.continue_speaker,
-                      adjust_voice=speaker_adjuster(settings))
+    script = parse_text(text, safe_name(settings.out_name),
+                        base_voices=base_cast(settings, roles, catalog),
+                        base_lexicon=lexicon_for(settings, source),
+                        continue_speaker=settings.continue_speaker,
+                        adjust_voice=speaker_adjuster(settings))
+    if attach and script.sounds:
+        attach_sounds(script, sounds_folder(settings, source))
+    return script
+
+
+def narration_script(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None,
+                     attach: bool = True, narrator: Optional[VoiceSpec] = None) -> Script:
+    """Plain text with [sound Name] lines as a one-voice script for the dialogue engine: the prose
+    between the sounds is cut like an audiobook (chunk size from Advanced) and read by the narrator."""
+    script = parse_narration(text, safe_name(settings.out_name),
+                             narrator=narrator or narrator_spec(settings, catalog),
+                             split=lambda t: split_text(t, max_chars=settings.chunk_size),
+                             base_lexicon=lexicon_for(settings, source))
+    if attach:
+        attach_sounds(script, sounds_folder(settings, source))
+    return script
 
 
 def validate(text: str, settings: Settings, catalog: Catalog, source: Optional[Path] = None) -> Check:
@@ -141,10 +182,21 @@ def validate(text: str, settings: Settings, catalog: Catalog, source: Optional[P
             voice = ""
         if is_multilingual(voice):
             check.warnings = [multilingual_warning("the narrator", voice)]
+        if d.sounds:
+            try:
+                s = narration_script(text, settings, catalog, source, attach=False, narrator=VoiceSpec(voice or "?"))
+            except ScriptError as e:
+                check.problems = [(n, gui_message(msg)) for _, n, msg in e.problems]
+                return check
+            except OSError as e:
+                check.problems = [(0, f"lexicon file: {e}")]
+                return check
+            check.script = s
+            _check_sounds(check, s, settings, source)
     if d.mode != "dialogue":
         return check
     try:
-        s = parse(text, settings, catalog, source)
+        s = parse(text, settings, catalog, source, attach=False)
     except ScriptError as e:
         check.problems = [(n, gui_message(msg)) for _, n, msg in e.problems]
         check.voices = build_cast(settings, d.roles, catalog)
@@ -156,11 +208,26 @@ def validate(text: str, settings: Settings, catalog: Catalog, source: Optional[P
     check.script = s
     check.voices = {r: s.voices[r] for r in dict.fromkeys(used)}
     check.warnings = duplicate_voice_warnings(s.voices, used)
+    _check_sounds(check, s, settings, source)
     return check
 
 
+def _check_sounds(check: Check, script: Script, settings: Settings, source: Optional[Path]) -> None:
+    """List what the sounds folder has for each sound, and report what's missing as problems."""
+    if not script.sounds:
+        return
+    folder = sounds_folder(settings, source)
+    check.sounds = find_sounds(script, folder)
+    try:
+        attach_sounds(script, folder)
+    except ScriptError as e:
+        check.problems += [(n, gui_message(msg)) for _, n, msg in e.problems]
+
+
 # Parser messages name CLI flags; say where the switch is in the window instead.
-_CLI_HINTS = {"use --continue-speaker": "turn on “Untagged lines continue the previous speaker” in Advanced"}
+_CLI_HINTS = {"use --continue-speaker": "turn on “Untagged lines continue the previous speaker” in Advanced",
+              "keep the text next to a 'sounds' folder, or choose one with --sounds":
+                  "save the text next to a 'sounds' folder, or choose one in Advanced → Sounds"}
 
 
 def gui_message(msg: str) -> str:
@@ -282,10 +349,18 @@ async def run_dialogue(text: str, settings: Settings, catalog: Catalog, on_progr
                                 Path(settings.out_dir).expanduser(), render_options(settings), on_progress)
 
 
-async def run_narration(text: str, settings: Settings, catalog: Catalog,
-                        on_progress: Optional[Progress] = None) -> List[Tuple[Path, int]]:
+async def run_narration(text: str, settings: Settings, catalog: Catalog, on_progress: Optional[Progress] = None,
+                        source: Optional[Path] = None, backend: Optional[Backend] = None) -> List[Tuple[Path, int]]:
+    """One MP3 read by the narrator. Text with [sound Name] lines is mixed by the dialogue engine
+    (needs ffmpeg); the extra outputs stay dialogue-only, so the files are those planned_outputs lists."""
     from .audiobook.builder import build_audiobook
 
+    if detect(text).sounds:
+        script = narration_script(text, settings, catalog, source)
+        opts = replace(render_options(settings), srt=False, lrc=False, shadow=False, slow=False, clips=False,
+                       wav=False)
+        return await render_scripts([script], backend or make_backend(settings),
+                                    Path(settings.out_dir).expanduser(), opts, on_progress)
     spec = narrator_spec(settings, catalog)
     out = Path(settings.out_dir).expanduser() / f"{safe_name(settings.out_name)}.mp3"
     await build_audiobook(text, spec.voice, out, rate=spec.rate, volume=spec.volume, pitch=spec.pitch,

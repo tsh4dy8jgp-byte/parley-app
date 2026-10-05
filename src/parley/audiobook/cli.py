@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import re
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from .builder import build_audiobook, print_progress
 from .chunker import DEFAULT_CHUNK_SIZE
 from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
+
+SOUND_CUE = re.compile(r"^\s*\[sound\s+\w[^\]]*\]\s*$", re.M | re.I)   # Parley's insert lines
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -91,6 +94,11 @@ async def run(args: argparse.Namespace) -> None:
     text = read_text(args.input)
     if not text.strip():
         raise SystemExit("error: input text is empty")
+
+    if SOUND_CUE.search(text):
+        print("warning: the text has [sound Name] lines, which this tool reads aloud as text. To insert "
+              "the audio files, open the text in the Parley app or render a tagged script with dialog-tts.",
+              file=sys.stderr)
 
     voice = args.voice or await resolve_voice(args.language, args.gender)
     print(f"Narrator voice: {voice}", file=sys.stderr)

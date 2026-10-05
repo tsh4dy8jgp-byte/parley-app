@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from typing import Callable, List
 
+from .script import Sound
 from .stitch import Cue
 
 
@@ -19,16 +20,22 @@ def _lrc_time(ms: int) -> str:
     return f"{m:02d}:{rest / 1000:05.2f}"
 
 
+def cue_text(cue: Cue, label: Callable[[str], str]) -> str:
+    """'Waiter: Good evening!' for a line, '♪ Brass band plays the anthem' for a sound."""
+    seg = cue.segment
+    if isinstance(seg, Sound):
+        return f"♪ {seg.caption}"
+    return f"{label(seg.role)}: {seg.text}"
+
+
 def to_srt(cues: List[Cue], label: Callable[[str], str]) -> str:
     blocks = []
     for i, cue in enumerate(cues, 1):
-        u = cue.utterance
-        blocks.append(f"{i}\n{_srt_time(cue.start_ms)} --> {_srt_time(cue.end_ms)}\n"
-                      f"{label(u.role)}: {u.text}\n")
+        blocks.append(f"{i}\n{_srt_time(cue.start_ms)} --> {_srt_time(cue.end_ms)}\n{cue_text(cue, label)}\n")
     return "\n".join(blocks)
 
 
 def to_lrc(cues: List[Cue], label: Callable[[str], str], title: str = "") -> str:
     lines = [f"[ti:{title}]"] if title else []
-    lines += [f"[{_lrc_time(c.start_ms)}]{label(c.utterance.role)}: {c.utterance.text}" for c in cues]
+    lines += [f"[{_lrc_time(c.start_ms)}]{cue_text(c, label)}" for c in cues]
     return "\n".join(lines) + "\n"
