@@ -10,7 +10,7 @@ Parley turns text into speech with [edge-tts](https://pypi.org/project/edge-tts/
 
 - **`parley`** is the Parley desktop app (customtkinter). It detects whether the text is narration or dialogue and calls the matching engine.
 - **`parley.audiobook`** turns plain text into a single-voice MP3. It needs only edge-tts, not ffmpeg. CLI: `audiobook`.
-- **`parley.dialog_tts`** renders role-tagged dialogue scripts (`[Role] text`) into multi-voice MP3s with subtitles and shadowing/slow variants. It needs pydub and ffmpeg. CLI: `dialog-tts`.
+- **`parley.dialog_tts`** renders role-tagged dialogue scripts (`[Role] text`) into multi-voice MP3s with subtitles and shadowing/slow variants. It also plays audio files the user supplies (`[sound Name]`, from a `sounds/` folder). It needs pydub and ffmpeg. CLI: `dialog-tts`.
 
 The engines never import the app. `parley/__init__.py` is only a docstring, so importing `parley.dialog_tts` or `parley.audiobook` does not load Tk, and both CLIs work without the `gui` extra. A test in `test_parley.py` checks this in a subprocess. Inside `parley`, modules import the engines relatively (`from .dialog_tts.script import ...`). Tests import them as `parley.dialog_tts.*`.
 
@@ -18,7 +18,7 @@ The desktop app was called TTS Studio before. The old name now appears only in t
 
 The German course "Deutsch im Ohr" (lesson files, the `.src` → tagged converter, the prosody study) lives outside this repo. Book `.txt` inputs in the repo root and all `.mp3`/`.wav` outputs are gitignored. Keep them out of the repo.
 
-`prompts/spoken-piece-interview.md` is a copy-paste prompt for chat assistants that interviews the user and then writes a tagged script. It restates the tag syntax and lists known voices, so update it when either changes. `tests/test_prompts.py` parses its ```` ```text ```` example.
+`prompts/spoken-piece-interview.md` is a copy-paste prompt for chat assistants that interviews the user and then writes a tagged script. It restates the tag syntax (including `[sound Name]` and `@sounds`) and lists known voices, so update it when either changes. `tests/test_prompts.py` parses its ```` ```text ```` example.
 
 ## Commands
 
@@ -34,6 +34,7 @@ python -m pytest tests/test_stitch.py -k shadow -q   # one test by name
 python dialog_tts.py render tests/fixtures/lektion_02.tagged.txt --dry-run   # parse only, prints segment table
 python dialog_tts.py render dialogue.tagged.txt -o out --srt --shadow --slow
 python dialog_tts.py render "lessons/*.tagged.txt" -o out --srt   # quote the glob; the tool expands it
+python dialog_tts.py render piece.tagged.txt --sounds music/ --dry-run   # [sound Name] files (default: sounds/ next to it)
 python dialog_tts.py voices dialogue.tagged.txt                   # check mapped voices exist (network)
 python parley.py                                                  # Parley desktop app (installed: parley)
 audiobook -i book.txt -l en -o book.mp3                           # after pip install -e .
@@ -48,10 +49,11 @@ The root launcher `parley.py` has the same name as the package. From the repo ro
 
 ### dialog_tts pipeline (`parley/dialog_tts/render.py` ties it together)
 
-1. **Parse** (`script.py`). `parse_text` collects *all* problems and raises one `ScriptError` with line numbers. Every `Utterance` has both `text`, which goes in the subtitles, and `speak`, which goes to TTS after the `@lexicon` / `lexicon.txt` / inline `{shown|spoken}` respellings. Keep the two separate.
-2. **Synthesize** (`tts.py`). Every unique `(speak, VoiceSpec)` pair across all scripts is synthesized once by `synth_all`. `CachedBackend` wraps `EdgeBackend`. The cache file is `<cache_dir>/<sha256 of text+voice+rate+pitch+volume>.mp3` and is written atomically. The `--slow` variant is re-synthesized at rate −20%, not time-stretched.
-3. **Stitch** (`stitch.py`). Clips are decoded to 24 kHz mono 16-bit and trimmed of edge-tts padding. `role_gains` gives each role one gain toward −16 LUFS. `loudness.py` measures with ffmpeg `ebur128`. `plan_timeline` is pure: it takes only segment durations and produces both the audio layout and the subtitle cues, so subtitles match the audio exactly. `assemble` joins raw PCM, and `finalize` applies one gain capped at a −1 dBFS peak.
-4. **Output**: MP3, plus optional WAV/SRT/LRC and a per-line clips folder. The output stem is cut at the first dot, so `lektion_02.tagged.txt` becomes `lektion_02`. MP3 tags come from `RenderOptions.tags` (`mp3tags.Tags`, written with mutagen; defaults: artist and album "Parley", genre "Speech", title = file name, and " (shadow)" / " (slow)" is added to a custom title). The `audiobook` engine and both CLIs use the same module and options. In the app, artist and album are on the Standard tab and the rest is the Advanced "File info" card.
+1. **Parse** (`script.py`). `parse_text` collects *all* problems and raises one `ScriptError` with line numbers. Every `Utterance` has both `text`, which goes in the subtitles, and `speak`, which goes to TTS after the `@lexicon` / `lexicon.txt` / inline `{shown|spoken}` respellings. Keep the two separate. Segments are `Utterance`, `Pause` and `Sound` (`[sound Name opts]`, with `@sounds` defaults merged in; the tag wins per option). `_body_lines` handles comments and `@` blocks for both `parse_text` and `parse_narration` (plain prose with sound/pause lines, cut by a `split` callable into `Narrator` utterances). The parser never touches the file system.
+2. **Sounds** (`sounds.py`). `attach_sounds(script, folder)` finds each name's file (`Name.*` by stem, case-insensitive, or the `@sounds` file), reads lengths with mutagen (no ffmpeg), checks `start`/`end`/fades against them, and raises one `ScriptError` or fills `script.sound_files`. `find_sounds` is the non-raising lookup the app lists. The CLI and the app call it after parsing, so `--dry-run` and the live check report missing files. `load_sound` decodes with ffmpeg directly (cut, downmix, resample), trims edge silence, levels to the speech target plus `volume` (capped at a −1 dBFS peak) and fades.
+3. **Synthesize** (`tts.py`). Every unique `(speak, VoiceSpec)` pair across all scripts is synthesized once by `synth_all`. `CachedBackend` wraps `EdgeBackend`. The cache file is `<cache_dir>/<sha256 of text+voice+rate+pitch+volume>.mp3` and is written atomically. The `--slow` variant is re-synthesized at rate −20%, not time-stretched.
+4. **Stitch** (`stitch.py`). Clips are decoded to 24 kHz mono 16-bit (48 kHz stereo, `HIFI`, when the script has sounds; speech-only output never changes) and trimmed of edge-tts padding. `role_gains` gives each role one gain toward −16 LUFS. `loudness.py` measures with ffmpeg `ebur128`, on a mono downmix, so stereo music and mono speech compare like for like. `plan_timeline` is pure: it takes the durations of the clips (utterances and sounds, in order) and produces both the audio layout and the subtitle cues, so subtitles match the audio exactly. A sound gets a change gap on both sides and no shadow gap. `assemble` joins raw PCM (bytes per ms come from the clips' format; 44.1 kHz would not give whole bytes), and `finalize` applies one gain capped at a −1 dBFS peak.
+5. **Output**: MP3 (64k, or `music_bitrate` 128k with sounds), plus optional WAV/SRT/LRC (a sound's cue is `♪ caption`) and a per-line clips folder (speech only). The output stem is cut at the first dot, so `lektion_02.tagged.txt` becomes `lektion_02`. MP3 tags come from `RenderOptions.tags` (`mp3tags.Tags`, written with mutagen; defaults: artist and album "Parley", genre "Speech", title = file name, and " (shadow)" / " (slow)" is added to a custom title). The `audiobook` engine and both CLIs use the same module and options. In the app, artist and album are on the Standard tab and the rest is the Advanced "File info" card.
 
 `Backend` is a Protocol (`fmt` + `async synth`). Tests use `FakeBackend` in `tests/conftest.py`, which returns WAV sine tones of 40 ms per character with a different loudness per voice.
 
@@ -61,10 +63,11 @@ The root launcher `parley.py` has the same name as the package. From the repo ro
 - CLI order, lowest to highest: `--voices` yaml < the file's `@voices` block.
 - GUI order, lowest to highest: `Catalog.auto_cast` for the chosen language < the file's `@voices` < the Advanced tab. The Advanced tab is applied through the `adjust_voice` hook of `parse_text` (`jobs.speaker_adjuster`).
 - A `lexicon.txt` next to a tagged file applies automatically. A file's own `@lexicon` entries win over it.
+- Sound files: `--sounds DIR` (CLI) or Advanced → Sounds (`settings.sounds_dir`) wins; otherwise `sounds/` next to the tagged / opened file. Pasted text without a file and no chosen folder reports a problem.
 
 ### Parley desktop app (`parley`)
 
-- `jobs.py` holds all logic that does not need a display: text detection, validation, casting, and running the engines. Tests cover it without Tk. `detect()` reuses the private `_TAG_LINE` / `_ROLE_NAME` regexes from `dialog_tts.script`, so a change to the tag syntax also changes how the GUI detects dialogue.
+- `jobs.py` holds all logic that does not need a display: text detection, validation, casting, and running the engines. Tests cover it without Tk. `detect()` reuses the private `_TAG_LINE` / `_ROLE_NAME` regexes from `dialog_tts.script`, so a change to the tag syntax also changes how the GUI detects dialogue. `[sound …]` lines and `@sounds` don't make a text a dialogue; they fill `Detection.sounds`. Narration with sounds goes through `narration_script` (`parse_narration` + the audiobook chunker + `narrator_spec`) and `render_scripts` with the extra outputs off, so it writes one MP3 like plain narration but needs ffmpeg. `validate` fills `Check.sounds` for the Advanced → Sounds card and turns missing files into line problems.
 - `Runner` runs one coroutine on its own thread with its own event loop and posts `Event`s to a queue. Only the Tk main thread touches widgets, by polling that queue (`app._poll`).
 - `settings.Settings` is a single dataclass persisted as JSON. `_coerce` drops values with the wrong type or an unknown choice. `model.Model` mirrors it as Tk variables. Files go in `~/.config/parley/` (override with the `PARLEY_HOME` env var), and the line cache is in `~/.cache/parley/`. On startup, `app.main()` calls `settings.migrate_legacy()` (unless `PARLEY_HOME` is set). It moves the TTS Studio folders over and never overwrites existing Parley ones. The tests construct `ParleyApp` directly, so they never trigger it.
 - `catalog.py` loads the voice list from a cached copy of the last online fetch, or from a built-in offline fallback.

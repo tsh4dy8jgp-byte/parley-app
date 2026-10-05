@@ -24,6 +24,7 @@ Lines like [A] Hello! → a dialogue, one voice per speaker.
 New to dialogues? Open the Guide (F1) or insert the example."""
 
 _TAG = re.compile(r"^\s*\[[^\]]*\]")
+_CUE = re.compile(r"^\s*\[(?:sound|pause)\b[^\]]*\]", re.I)   # the only tags narration has
 HIGHLIGHT_LIMIT = 200_000      # characters; above this only problem lines are marked
 
 
@@ -239,6 +240,7 @@ class StandardTab(ctk.CTkFrame):
         d = check.detection
         self._first_problem = 0
         warn = f"   ·   ⚠ {check.warnings[0].split(': ', 1)[-1]}" if check.warnings else ""
+        sounds = f" · {len(d.sounds)} sound{'s' * (len(d.sounds) != 1)}" if d.sounds else ""
         if d.mode == "empty":
             self._status("", t.MUTED)
         elif check.problems:
@@ -251,14 +253,14 @@ class StandardTab(ctk.CTkFrame):
         elif d.mode == "narration":
             mins = estimate_minutes(d.words)
             length = f"about {mins:.0f} min" if mins >= 1 else "under a minute"
-            self._status(f"Narration · {d.words:,} words · {length} · voice {narrator}{warn}",
+            self._status(f"Narration · {d.words:,} words · {length}{sounds} · voice {narrator}{warn}",
                          t.WARNING if warn else t.MUTED)
         else:
             cast = "   ".join(f"{role} → {_voice_label(catalog, spec.voice)}"
                               for role, spec in list(check.voices.items())[:6])
             more = f"   +{len(check.voices) - 6}" if len(check.voices) > 6 else ""
             lines = len(check.script.utterances) if check.script else 0
-            self._status(f"Dialogue · {len(check.voices)} speakers · {lines} lines   ·   {cast}{more}{warn}",
+            self._status(f"Dialogue · {len(check.voices)} speakers · {lines} lines{sounds}   ·   {cast}{more}{warn}",
                          t.WARNING if warn else t.MUTED)
         self.highlight(check)
 
@@ -276,14 +278,16 @@ class StandardTab(ctk.CTkFrame):
         for tag in ("speaker", "comment", "problem"):
             self.editor.tag_remove(tag, "1.0", "end")
         text = self.text()
-        if check.detection.mode == "dialogue" and len(text) <= HIGHLIGHT_LIMIT:
+        d = check.detection
+        tags = _TAG if d.mode == "dialogue" else _CUE if d.mode == "narration" and d.sounds else None
+        if tags is not None and len(text) <= HIGHLIGHT_LIMIT:
             spans: Dict[str, List[str]] = {"speaker": [], "comment": []}
             for n, line in enumerate(text.splitlines(), 1):
                 s = line.lstrip()
                 if s.startswith("#") or s.startswith("@"):
                     spans["comment"] += [f"{n}.0", f"{n}.end"]
                 else:
-                    m = _TAG.match(line)
+                    m = tags.match(line)
                     if m:
                         spans["speaker"] += [f"{n}.0", f"{n}.{m.end()}"]
             for tag, idx in spans.items():

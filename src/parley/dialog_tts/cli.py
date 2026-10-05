@@ -12,7 +12,8 @@ from typing import List
 
 from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from .render import RenderOptions, render_scripts
-from .script import Script, ScriptError, load_lexicon, parse_file
+from .script import Pause, Script, ScriptError, Sound, fmt_time, load_lexicon, parse_file
+from .sounds import attach_sounds, default_folder, length_ms
 from .stitch import Gaps
 from .tts import CachedBackend, EdgeBackend
 from .voices import check_voices_exist, duplicate_voice_warnings, load_voices_yaml
@@ -28,6 +29,8 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--voices", help="voices.yaml with role -> voice defaults (a file's @voices wins)")
     r.add_argument("--lexicon", help="shared lexicon 'word = spoken form' (default: lexicon.txt next to "
                    "each tagged file, if present; a file's @lexicon entries win)")
+    r.add_argument("--sounds", help="folder with the audio files for [sound Name] lines "
+                   "(default: sounds/ next to each tagged file)")
     r.add_argument("--dry-run", action="store_true", help="print the parsed segment table, no TTS")
     r.add_argument("--continue-speaker", action="store_true",
                    help="treat untagged lines as more text from the previous speaker")
@@ -66,7 +69,8 @@ def expand(patterns: List[str]) -> List[Path]:
     return out
 
 
-def load_scripts(files: List[Path], voices_yaml, continue_speaker: bool, lexicon=None) -> List[Script]:
+def load_scripts(files: List[Path], voices_yaml, continue_speaker: bool, lexicon=None, sounds=None,
+                 resolve_sounds: bool = True) -> List[Script]:
     base = load_voices_yaml(Path(voices_yaml)) if voices_yaml else {}
     lexicons = {}
     scripts, failed = [], False
@@ -77,6 +81,8 @@ def load_scripts(files: List[Path], voices_yaml, continue_speaker: bool, lexicon
                 lexicons[lex_path] = load_lexicon(lex_path) if (lexicon or lex_path.is_file()) else {}
             s = parse_file(f, base_voices=base, base_lexicon=lexicons[lex_path],
                            continue_speaker=continue_speaker)
+            if resolve_sounds and s.sounds:
+                attach_sounds(s, Path(sounds) if sounds else default_folder(f))
         except FileNotFoundError:
             print(f"error: file not found: {f}", file=sys.stderr)
             failed = True
@@ -98,8 +104,15 @@ def print_table(s: Script) -> None:
     print(f"{'#':>3} {'line':>4}  {'role':<9} {'voice':<34} {'prosody':<24} text")
     i = 0
     for seg in s.segments:
-        if hasattr(seg, "seconds"):
+        if isinstance(seg, Pause):
             print(f"{'':>3} {seg.line:>4}  {'[pause]':<9} {'':<34} {'':<24} {seg.seconds:g} s")
+            continue
+        if isinstance(seg, Sound):
+            path = s.sound_files.get(seg.name)
+            length = length_ms(path) if path else None
+            file = (path.name if path else seg.file or "?") + (f" {fmt_time(length)}" if length is not None else "")
+            print(f"{'':>3} {seg.line:>4}  {'[sound]':<9} {seg.name + ': ' + file:<34} "
+                  f"{seg.opts.describe():<24} {seg.caption}")
             continue
         i += 1
         extra = f" x{seg.repeat}" if seg.repeat > 1 else ""
@@ -116,7 +129,7 @@ def _progress(done: int, total: int) -> None:
 
 
 def cmd_render(a: argparse.Namespace) -> None:
-    scripts = load_scripts(expand(a.files), a.voices, a.continue_speaker, a.lexicon)
+    scripts = load_scripts(expand(a.files), a.voices, a.continue_speaker, a.lexicon, a.sounds)
     if a.dry_run:
         for s in scripts:
             print_table(s)
@@ -136,8 +149,9 @@ def cmd_render(a: argparse.Namespace) -> None:
     for path, ms in written:
         dur = f"{ms / 1000:7.1f} s" if path.suffix == ".mp3" else ""
         print(f"  {path}  {dur}")
-    print(f"{len(scripts)} file(s), {backend.misses} lines synthesised, {backend.hits} from cache, "
-          f"{elapsed:.1f} s", file=sys.stderr)
+    sounds = sum(len(s.sounds) for s in scripts)
+    print(f"{len(scripts)} file(s), {backend.misses} lines synthesised, {backend.hits} from cache"
+          + (f", {sounds} sound(s) inserted" if sounds else "") + f", {elapsed:.1f} s", file=sys.stderr)
 
 
 def cmd_voices(a: argparse.Namespace) -> None:
@@ -148,7 +162,7 @@ def cmd_voices(a: argparse.Namespace) -> None:
         for v in sorted(voices, key=lambda v: v["ShortName"]):
             print(f"{v['ShortName']:<36} {v['Gender']:<7} {v['Locale']}")
     if a.files:
-        scripts = load_scripts(expand(a.files), None, False)
+        scripts = load_scripts(expand(a.files), None, False, resolve_sounds=False)
         specs = {spec for s in scripts for spec in s.voices.values()}
         missing = asyncio.run(check_voices_exist(specs))
         print("all mapped voices exist" if not missing else f"MISSING voices: {', '.join(missing)}")

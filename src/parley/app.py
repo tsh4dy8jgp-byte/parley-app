@@ -72,6 +72,7 @@ class ParleyApp(*_BASES):
         self._validate_job = None
         self._t0 = 0.0
         self._unit = "lines"
+        self._mixing = True          # the run mixes clips after synthesis (dialogues, text with sounds)
 
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(1, weight=1)
@@ -253,15 +254,17 @@ class ParleyApp(*_BASES):
         self.standard.show_language_use(jobs.language_use(check, s, self.catalog), check.detection.mode)
         self.advanced.set_roles(check.detection.roles, check.voices, check.detection.pinned, self.catalog)
         self.advanced.set_mode(check.detection.mode)
+        self.advanced.set_sounds(check.sounds, jobs.sounds_folder(s, self.source))
         d = check.detection
+        sounds = f" · {len(d.sounds)} sound{'s' * (len(d.sounds) != 1)}" if d.sounds else ""
         if d.mode == "empty":
             self.badge.set("")
         elif check.problems:
             self.badge.set(f"{len(check.problems)} problem{'s' * (len(check.problems) > 1)}", "danger")
         elif d.mode == "dialogue":
-            self.badge.set(f"Dialogue · {len(d.roles)} speaker{'s' * (len(d.roles) != 1)}", "accent")
+            self.badge.set(f"Dialogue · {len(d.roles)} speaker{'s' * (len(d.roles) != 1)}{sounds}", "accent")
         else:
-            self.badge.set("Narration", "neutral")
+            self.badge.set(f"Narration{sounds}", "neutral")
 
     def _narrator_label(self, s: st.Settings) -> str:
         try:
@@ -360,7 +363,8 @@ class ParleyApp(*_BASES):
         if mode == "empty":
             self.set_status("Nothing to read yet: paste some text or insert the example dialogue.", "error")
             return
-        if mode == "dialogue":
+        mixing = mode == "dialogue" or bool(check.detection.sounds)
+        if mixing:
             hint = system.dialogue_ready()
             if hint:
                 self.set_status(hint, "error")
@@ -390,12 +394,13 @@ class ParleyApp(*_BASES):
             return
         st.save(s)
         source = self.source
+        self._mixing = mixing
         if mode == "dialogue":
             self._unit = "lines"
             self.gen.start(lambda p: jobs.run_dialogue(text, s, self.catalog, p, source=source))
         else:
             self._unit = "parts"
-            self.gen.start(lambda p: jobs.run_narration(text, s, self.catalog, p))
+            self.gen.start(lambda p: jobs.run_narration(text, s, self.catalog, p, source=source))
         self._t0 = time.perf_counter()
         self._set_running(True)
         self.set_status("Connecting to the voice service…", "info")
@@ -480,7 +485,7 @@ class ParleyApp(*_BASES):
         if ev.type == "progress":
             done, total = ev.payload
             self.progress.set(done / max(total, 1))
-            if done == total and self._unit == "lines":
+            if done == total and self._mixing:
                 self.set_status(f"Synthesised {total} {self._unit} · mixing audio…", "info")
             else:
                 self.set_status(f"Synthesising {done} / {total} {self._unit}…", "info")

@@ -53,15 +53,15 @@ def stop(process: Optional[subprocess.Popen]) -> None:
 
 
 def dialogue_ready() -> Optional[str]:
-    """None if dialogue rendering can run, else a short hint on what to install."""
+    """None if dialogues and sound inserts can be mixed, else a short hint on what to install."""
     try:
         import pydub  # noqa: F401
     except ImportError:
-        return 'Dialogues need pydub: pip install -e ".[gui]"'
+        return 'Dialogues and sounds need pydub: pip install -e ".[gui]"'
     if not (shutil.which("ffmpeg") or shutil.which("avconv")):
         hint = {"darwin": "brew install ffmpeg", "win32": "winget install Gyan.FFmpeg"}.get(
             sys.platform, "sudo apt install ffmpeg")
-        return f"Dialogues need ffmpeg: {hint}"
+        return f"Dialogues and sounds need ffmpeg: {hint}"
     return None
 
 

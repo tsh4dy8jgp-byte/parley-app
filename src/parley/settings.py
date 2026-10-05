@@ -84,6 +84,8 @@ class Settings:
     # Pronunciation & parsing
     lexicon: str = ""
     continue_speaker: bool = False
+    # Sounds: folder of the files for [sound Name] lines ("" = sounds/ next to the opened file)
+    sounds_dir: str = ""
     # Performance
     concurrency: int = 4
     chunk_size: int = DEFAULT_CHUNK_SIZE

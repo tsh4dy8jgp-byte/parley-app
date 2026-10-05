@@ -34,7 +34,7 @@ def catalog():
 # --- settings -----------------------------------------------------------------------------------
 
 def test_settings_round_trip(tmp_path):
-    s = st.Settings(language="kk-KZ", srt=True, gap_change=600, target=-18.0)
+    s = st.Settings(language="kk-KZ", srt=True, gap_change=600, target=-18.0, sounds_dir="/music")
     s.speakers["A"] = st.Speaker("en-US-AvaNeural", rate=-10, pitch=5)
     st.save(s, tmp_path / "s.json")
     assert st.load(tmp_path / "s.json") == s
@@ -45,11 +45,11 @@ def test_settings_tolerate_bad_files(tmp_path):
     assert st.load(p) == st.Settings()                       # missing
     p.write_text("{not json")
     assert st.load(p) == st.Settings()                       # corrupt
-    p.write_text(json.dumps({"language": 5, "srt": "yes", "gap_same": 100, "bogus": 1,
+    p.write_text(json.dumps({"language": 5, "srt": "yes", "gap_same": 100, "bogus": 1, "sounds_dir": ["x"],
                              "target": -20, "speakers": {"A": {"voice": "x", "rate": "fast"},
                                                          "bad name": {"voice": "y"}}}))
     s = st.load(p)
-    assert (s.language, s.srt, s.gap_same, s.target) == ("en-US", False, 100, -20.0)
+    assert (s.language, s.srt, s.gap_same, s.target, s.sounds_dir) == ("en-US", False, 100, -20.0, "")
     assert s.speakers == {"A": st.Speaker("x")}
 
 
@@ -144,6 +144,14 @@ def test_detect():
     assert (d.mode, d.roles) == ("dialogue", ["B", "A"])
     d = jobs.detect("@voices\nA = en-US-AvaNeural\n@end\n@lexicon\nX = y\n@end\n[A] Hi\n[B] Yo")
     assert (d.mode, d.roles, d.pinned) == ("dialogue", ["A", "B"], ["A"])
+
+
+def test_detect_sounds():
+    d = jobs.detect("@sounds\nRain  # [B] is not a speaker here\n@end\nIt rained.\n[sound Rain fade_in=2]\n"
+                    "[Sound Bell]\n[sound Rain]\nThe end.")
+    assert (d.mode, d.roles, d.sounds) == ("narration", [], ["Rain", "Bell"])
+    d = jobs.detect("[A] Hi\n[sound Bell]\n[B] Yo")
+    assert (d.mode, d.roles, d.sounds) == ("dialogue", ["A", "B"], ["Bell"])
 
 
 def test_build_cast_precedence(catalog):
@@ -397,3 +405,67 @@ def test_narration_mp3_gets_tags(tmp_path):
         builder._synthesize_chunk = old
     t = ID3(out)
     assert (t["TIT2"].text[0], t["TPE1"].text[0], t["TALB"].text[0]) == ("book", "Me", "Parley")
+
+
+# --- sounds -------------------------------------------------------------------------------------
+
+STORY = "@sounds\nRain  fade_in=1   # Rain on the roof\n@end\nIt was late.\n[sound Rain end=1.5]\nThe end.\n"
+
+
+def test_validate_narration_with_a_missing_sound(tmp_path, catalog):
+    s = st.Settings(language="en-US")
+    check = jobs.validate(STORY, s, catalog)                                   # pasted: no folder at all
+    assert check.detection.mode == "narration" and check.problems[0][0] == 5
+    assert check.problems[0][1] == ("sound Rain: no sounds folder (save the text next to a 'sounds' folder, "
+                                    "or choose one in Advanced → Sounds)")
+    (rain,) = check.sounds
+    assert (rain.name, rain.caption, rain.path) == ("Rain", "Rain on the roof", None)
+    check = jobs.validate(STORY, s, catalog, source=tmp_path / "story.txt")
+    assert check.problems == [(5, f"sound Rain: the sounds folder {tmp_path / 'sounds'} does not exist "
+                                  "(create it and put Rain.mp3 there)")]
+
+
+def test_validate_finds_sounds_next_to_the_file_or_in_the_chosen_folder(tmp_path, catalog):
+    from conftest import write_sound
+
+    write_sound(tmp_path / "sounds", "Rain.wav")
+    check = jobs.validate(STORY, st.Settings(language="en-US"), catalog, source=tmp_path / "story.txt")
+    assert not check.problems and check.sounds[0].path == tmp_path / "sounds/Rain.wav"
+    assert [type(x).__name__ for x in check.script.segments] == ["Utterance", "Sound", "Utterance"]
+    write_sound(tmp_path / "music", "Rain.ogg.wav")                         # wrong name in the chosen folder
+    chosen = st.Settings(language="en-US", sounds_dir=str(tmp_path / "music"))
+    assert jobs.sounds_folder(chosen, tmp_path / "story.txt") == tmp_path / "music"
+    check = jobs.validate("[A] Hi.\n[sound Rain]\n", chosen, catalog, source=tmp_path / "story.txt")
+    assert check.problems == [(2, f"sound Rain: put Rain.mp3 (or .wav, .m4a, .ogg, .flac) in {tmp_path / 'music'}")]
+    assert set(check.voices) == {"A"}                                       # the cast is still shown
+
+
+def test_run_narration_with_sounds_mixes_one_mp3(tmp_path, fake, catalog):
+    from pydub import AudioSegment
+
+    from conftest import write_sound
+
+    write_sound(tmp_path / "sounds", "Rain.wav")
+    s = st.Settings(language="en-US", out_dir=str(tmp_path / "out"), out_name="story", srt=True, shadow=True,
+                    cache_dir=str(tmp_path / "cache"))
+    text = STORY + "\n" + "Another paragraph. " * 20
+    written = asyncio.run(jobs.run_narration(text, st.Settings(**{**s.__dict__, "chunk_size": 200}), catalog,
+                                             backend=fake, source=tmp_path / "story.txt"))
+    assert [p.name for p, _ in written] == [p.name for p in jobs.planned_outputs(s, "narration")] == ["story.mp3"]
+    assert len(fake.calls) == 3                    # 'It was late.', then 'The end. Another …' cut in 2
+    assert all(len(text) <= 200 for text, _ in fake.calls)                  # the narration chunk size
+    assert {spec.voice for _, spec in fake.calls} == {jobs.narrator_spec(s, catalog).voice}
+    audio = AudioSegment.from_file(tmp_path / "out/story.mp3")
+    assert (audio.frame_rate, audio.channels) == (48000, 2)
+
+
+def test_run_dialogue_with_a_sound(tmp_path, fake, catalog):
+    from conftest import write_sound
+
+    write_sound(tmp_path / "sounds", "Bell.wav", ms=500)
+    s = st.Settings(language="en-US", out_dir=str(tmp_path / "out"), out_name="talk", srt=True,
+                    cache_dir=str(tmp_path / "cache"))
+    written = asyncio.run(jobs.run_dialogue("[A] Hello.\n[sound Bell]\n[B] Hi!", s, catalog, backend=fake,
+                                            source=tmp_path / "talk.txt"))
+    assert [p.name for p, _ in written] == ["talk.mp3", "talk.srt"]
+    assert "♪ Bell" in (tmp_path / "out/talk.srt").read_text(encoding="utf-8")

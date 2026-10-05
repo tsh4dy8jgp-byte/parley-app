@@ -2,11 +2,13 @@
 
 from __future__ import annotations
 
+from pathlib import Path
 from tkinter import messagebox
 from typing import TYPE_CHECKING, Dict, List, Optional, Sequence, Tuple
 
 import customtkinter as ctk
 
+from .dialog_tts.sounds import SoundFile, label as sound_label
 from .dialog_tts.voices import VoiceSpec
 
 from . import system
@@ -107,6 +109,9 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         self._roles: List[str] = []
         self._voices: Dict[str, VoiceSpec] = {}
         self._pinned: Sequence[str] = ()
+        self._sounds: List[SoundFile] = []
+        self._sounds_shown: Optional[tuple] = None
+        self._sound_folder: Optional[Path] = None
 
         # Voices -------------------------------------------------------------------------------
         card = self._card(0, "Voices", "Automatic uses the voice from the text's @voices block if it has one, "
@@ -142,14 +147,35 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         self.empty = w.caption(self.speaker_box, "No speakers yet. Write lines like [A] Hello! or insert the "
                                                  "example from the Guide; each speaker then appears here.")
 
+        # Sounds -------------------------------------------------------------------------------
+        b = self._card(1, "Sounds", "Audio files played where the text has a [sound Name] line: music, an anthem, "
+                                    "a radio clip. Name each file after its sound, e.g. Anthem1.mp3 (or .wav, "
+                                    ".m4a, .ogg, .flac).").body
+        b.grid_columnconfigure(1, weight=1)
+        w.label(b, "Sounds folder", width=150).grid(row=0, column=0, sticky="w")
+        w.PathPicker(b, m["sounds_dir"], kind="dir", title="Sounds folder", clearable=True).grid(
+            row=0, column=1, columnspan=2, sticky="ew", padx=(8, 0))
+        self.sounds_note = w.caption(b, "", wraplength=540)
+        self.sounds_note.grid(row=1, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(4, 0))
+        tools = ctk.CTkFrame(b, fg_color="transparent")
+        tools.grid(row=2, column=1, columnspan=2, sticky="w", padx=(8, 0), pady=(8, 10))
+        w.ghost(tools, "Open folder", self.open_sound_folder).grid(row=0, column=0)
+        w.ghost(tools, "↻ Check again", app.validate_now).grid(row=0, column=1, padx=(6, 0))
+        self.sound_box = ctk.CTkFrame(b, fg_color="transparent")
+        self.sound_box.grid(row=3, column=0, columnspan=3, sticky="ew")
+        self.sound_box.grid_columnconfigure(0, weight=1)
+        self.sound_rows: List[ctk.CTkFrame] = []
+        self.no_sounds = w.caption(self.sound_box, "No [sound Name] lines in the text.")
+        self.no_sounds.grid(row=0, column=0, sticky="w")
+
         # Dialogue timing ----------------------------------------------------------------------
-        b = self._card(1, "Dialogue timing", "Silence inserted between lines. [pause N] in the text always wins.").body
+        b = self._card(2, "Dialogue timing", "Silence inserted between lines. [pause N] in the text always wins.").body
         w.SliderRow(b, 0, "Between speakers", m["gap_change"], 0, 2000, 50, ms)
         w.SliderRow(b, 1, "Same speaker", m["gap_same"], 0, 2000, 50, ms)
         w.SliderRow(b, 2, "Between repeats", m["gap_repeat"], 0, 3000, 50, ms)
 
         # Extra outputs ------------------------------------------------------------------------
-        b = self._card(2, "Extra outputs", "Written next to the main MP3. Dialogues only.").body
+        b = self._card(3, "Extra outputs", "Written next to the main MP3. Dialogues only.").body
         b.grid_columnconfigure((0, 1), weight=1, uniform="o")
         for i, (key, text) in enumerate([("srt", "SRT subtitles"), ("lrc", "LRC lyrics"),
                                          ("shadow", "Shadowing version (repeat-after-me gaps)"),
@@ -162,7 +188,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         w.SliderRow(shadow, 0, "Shadowing gap", m["shadow_factor"], 0.5, 3.0, 0.1, lambda v: f"{v:.1f} × line")
 
         # Sound --------------------------------------------------------------------------------
-        b = self._card(3, "Sound", "Every speaker is levelled to the same loudness, then the whole file "
+        b = self._card(4, "Loudness", "Every speaker is levelled to the same loudness, then the whole file "
                                    "to the target (never above −1 dBFS peaks).").body
         w.label(b, "Measure", width=150).grid(row=0, column=0, sticky="w")
         self.loudness = w.segmented(b, ["LUFS (EBU R128)", "dBFS"], command=self._pick_loudness)
@@ -172,7 +198,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
                     lambda v: f"{v:.0f} {'dBFS' if m['loudness'].get() == 'dbfs' else 'LUFS'}")
 
         # File info ----------------------------------------------------------------------------
-        b = self._card(4, "File info", "MP3 tags so a music app can sort and show the files. Artist and album "
+        b = self._card(5, "File info", "MP3 tags so a music app can sort and show the files. Artist and album "
                           "are on the Standard tab. Empty fields are left out.").body
         b.grid_columnconfigure(1, weight=1)
         for i, (key, text, hint) in enumerate([
@@ -187,7 +213,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
             row=6, column=1, sticky="ew", padx=(8, 0), pady=3)
 
         # Pronunciation & parsing --------------------------------------------------------------
-        b = self._card(5, "Pronunciation & parsing").body
+        b = self._card(6, "Pronunciation & parsing").body
         w.label(b, "Lexicon file", width=150).grid(row=0, column=0, sticky="w")
         w.PathPicker(b, m["lexicon"], kind="file", title="Lexicon (word = spoken form)",
                      filetypes=(("Text", "*.txt"), ("All files", "*")), clearable=True).grid(
@@ -198,7 +224,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
             row=2, column=0, columnspan=3, sticky="w")
 
         # Performance --------------------------------------------------------------------------
-        b = self._card(6, "Performance").body
+        b = self._card(7, "Performance").body
         w.SliderRow(b, 0, "Parallel requests", m["concurrency"], 1, 8, 1, lambda v: f"{v:.0f}")
         w.SliderRow(b, 1, "Narration chunk", m["chunk_size"], 500, 5000, 250, lambda v: f"{v:,.0f} chars")
         w.label(b, "Cache folder", width=150).grid(row=2, column=0, sticky="w", pady=(6, 0))
@@ -211,7 +237,7 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         w.ghost(cache, "Clear cache", self.clear_cache).grid(row=0, column=1, padx=(12, 0))
 
         # Appearance ---------------------------------------------------------------------------
-        b = self._card(7, "Appearance").body
+        b = self._card(8, "Appearance").body
         w.label(b, "Theme", width=150).grid(row=0, column=0, sticky="w")
         w.segmented(b, ["System", "Light", "Dark"], variable=m["appearance"]).grid(row=0, column=1, sticky="w",
                                                                                    padx=(8, 0))
@@ -276,6 +302,65 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         if name not in self.extra_roles:
             self.extra_roles.append(name)
         self.app.validate_now()
+
+    # --- sounds -------------------------------------------------------------------------------
+    def set_sounds(self, sounds: List[SoundFile], folder: Optional[Path]) -> None:
+        """Show what the sounds folder has for each [sound Name] in the text."""
+        self._sounds, self._sound_folder = sounds, folder
+        if self.app.model["sounds_dir"].get().strip():
+            note = ""
+        elif folder is not None:
+            note = f"Empty: the sounds folder next to the opened file ({folder})."
+        else:
+            note = "Empty: a folder named sounds next to the opened file. This text isn't saved yet, so choose a folder."
+        self.sounds_note.configure(text=note)
+        shown = tuple((f.name, f.caption, str(f.path), f.length_ms, f.problem) for f in sounds)
+        if shown == self._sounds_shown:
+            return
+        self._sounds_shown = shown
+        for row in self.sound_rows:
+            row.destroy()
+        self.sound_rows = [self._sound_row(i, f) for i, f in enumerate(sounds)]
+        if sounds:
+            self.no_sounds.grid_forget()
+        else:
+            self.no_sounds.grid(row=0, column=0, sticky="w")
+
+    def _sound_row(self, i: int, f: SoundFile) -> ctk.CTkFrame:
+        row = ctk.CTkFrame(self.sound_box, fg_color=t.FIELD, corner_radius=8)
+        row.grid(row=i, column=0, sticky="ew", pady=(0, 8))
+        row.grid_columnconfigure(2, weight=1)
+        ctk.CTkLabel(row, text=f.name, height=26, corner_radius=13, fg_color=t.ACCENT_SOFT, text_color=t.ACCENT,
+                     font=t.font(12, "bold")).grid(row=0, column=0, padx=10, pady=8, sticky="w")
+        w.caption(row, f.caption if f.caption != f.name else "").grid(row=0, column=1, sticky="w")
+        status = f"✕ {self._short(f.problem)}" if f.problem else sound_label(f)
+        w.label(row, status, size=12, color=t.WARNING if f.problem else t.MUTED, wraplength=420).grid(
+            row=0, column=2, sticky="e", padx=8)
+        play = w.icon_button(row, "▶", lambda: system.open_path(f.path))
+        play.grid(row=0, column=3, padx=(0, 6))
+        if f.path is None:
+            play.configure(state="disabled")
+        return row
+
+    def _short(self, problem: str) -> str:
+        """The problem without "sound Name: " and the folder path, which the card already shows."""
+        text = problem.split(": ", 1)[-1]
+        if self._sound_folder is not None:
+            folder = str(self._sound_folder)
+            text = text.replace(f"the sounds folder {folder}", "the sounds folder").replace(folder, "the sounds folder")
+        return text
+
+    def open_sound_folder(self) -> None:
+        folder = self._sound_folder
+        if folder is None:
+            self.app.set_status("Save the text first, or choose a sounds folder.", "error")
+            return
+        try:
+            folder.mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            self.app.set_status(f"Can't create the sounds folder: {e}", "error")
+            return
+        system.open_path(folder)
 
     # --- sound / cache ------------------------------------------------------------------------
     def _pick_loudness(self, label: str) -> None:

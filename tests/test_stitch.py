@@ -5,11 +5,12 @@ from pydub import AudioSegment
 from parley.dialog_tts.loudness import measure_lufs
 from parley.dialog_tts.render import RenderOptions, render_scripts
 from parley.dialog_tts.script import parse_text
+from parley.dialog_tts.sounds import attach_sounds
 from parley.dialog_tts.stitch import Gaps, decode, plan_timeline, trim_silence
 from parley.dialog_tts.subtitles import to_srt
 from parley.dialog_tts.tts import CachedBackend
 
-from conftest import tone_wav
+from conftest import tone_wav, write_sound
 
 VOICES = """\
 @voices
@@ -177,3 +178,67 @@ def test_tags_default_and_configurable(tmp_path, fake):
     assert str(t["TDRC"].text[0]) == "2025" and t["COMM::eng"].text[0] == "hi"
     assert t["APIC:Cover"].mime == "image/png"
     assert ID3(tmp_path / "o/talk.shadow.mp3")["TIT2"].text[0] == "Lesson 2 (shadow)"
+
+
+def test_sounds_get_a_change_gap_on_both_sides():
+    s = parse_text(VOICES + "[Male1] Eins.\n[sound Anthem]\n[sound Bell]\n[Male1] Zwei.\n[pause 1]\n"
+                   "[sound Bell]\n[Narrator] Ende.\n")
+    tl = plan_timeline(s.segments, [400, 2000, 300, 500, 300, 600], Gaps(lead_ms=0, tail_ms=0, shadow_factor=1.3))
+    assert [(i.why, i.start_ms, i.dur_ms, i.clip_index) for i in tl.items] == [
+        ("clip", 0, 400, 0),
+        ("shadow", 400, 520, None),
+        ("gap-change", 920, 450, None),
+        ("sound", 1370, 2000, 1),       # no shadow gap after a sound
+        ("gap-change", 3370, 450, None),
+        ("sound", 3820, 300, 2),
+        ("gap-change", 4120, 450, None),
+        ("clip", 4570, 500, 3),         # the same speaker as before the sounds: still a change gap
+        ("shadow", 5070, 650, None),
+        ("pause", 5720, 1000, None),    # a pause replaces the gap
+        ("sound", 6720, 300, 4),
+        ("gap-change", 7020, 450, None),
+        ("clip", 7470, 600, 5),
+    ]
+    assert [type(c.segment).__name__ for c in tl.cues] == ["Utterance", "Sound", "Sound", "Utterance", "Sound",
+                                                           "Utterance"]
+    assert (tl.cues[1].start_ms, tl.cues[1].end_ms) == (1370, 3370)
+
+
+def test_render_with_a_sound_is_48k_stereo(tmp_path, fake):
+    write_sound(tmp_path / "sounds", "Anthem1.wav", ms=3000, amp=0.05)
+    text = ("@sounds\nAnthem1  fade_out=0.5   # Brass band plays the anthem\n@end\n"
+            "[Male1] Eins, zwei, drei, vier, fünf.\n[sound Anthem1 start=0.5 end=2]\n[Male2] Zwei.\n")
+    s = parse_text(VOICES + text, str(tmp_path / "piece.tagged.txt"))
+    attach_sounds(s, tmp_path / "sounds")
+    opts = RenderOptions(gaps=Gaps(lead_ms=100, tail_ms=200), srt=True, slow=True)
+    written = dict(asyncio.run(render_scripts([s], CachedBackend(fake, tmp_path / "c"), tmp_path / "out", opts)))
+    clip = [40 * len(u.text) + 80 for u in s.utterances]
+    expected = 100 + clip[0] + 450 + 1500 + 450 + clip[1] + 200
+    assert abs(written[tmp_path / "out/piece.mp3"] - expected) <= 15
+    audio = AudioSegment.from_file(tmp_path / "out/piece.mp3")
+    assert (audio.frame_rate, audio.channels) == (48000, 2)
+    assert abs(len(audio) - expected) < 80
+    sound = audio[100 + clip[0] + 450 + 200: 100 + clip[0] + 450 + 1000]
+    speech = audio[100 + 200: 100 + clip[0] - 200]
+    assert abs(measure_lufs(sound) - measure_lufs(speech)) < 1.0         # 0.05 vs 0.6 amplitude before leveling
+    srt = (tmp_path / "out/piece.srt").read_text(encoding="utf-8")
+    assert "\n♪ Brass band plays the anthem\n" in srt and srt.count("-->") == 3
+    slow = AudioSegment.from_file(tmp_path / "out/piece.slow.mp3")
+    assert (slow.frame_rate, slow.channels) == (48000, 2)
+
+
+def test_render_without_sounds_stays_24k_mono(tmp_path, fake):
+    s = parse_text(VOICES + "[Male1] Eins.\n", str(tmp_path / "plain.txt"))
+    asyncio.run(render_scripts([s], CachedBackend(fake, tmp_path / "c"), tmp_path / "out", RenderOptions()))
+    audio = AudioSegment.from_file(tmp_path / "out/plain.mp3")
+    assert (audio.frame_rate, audio.channels) == (24000, 1)
+
+
+def test_render_needs_looked_up_sounds(tmp_path, fake):
+    s = parse_text(VOICES + "[Male1] Eins.\n[sound Bell]\n", str(tmp_path / "x.txt"))
+    try:
+        asyncio.run(render_scripts([s], CachedBackend(fake, tmp_path / "c"), tmp_path / "out", RenderOptions()))
+    except RuntimeError as e:
+        assert str(e) == "line 8: sound Bell has no file (look it up with attach_sounds)"
+    else:
+        raise AssertionError("rendered a sound without a file")
