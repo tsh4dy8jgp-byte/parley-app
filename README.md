@@ -79,14 +79,20 @@ pip install -e ".[gui]"             # customtkinter, tkinterdnd2, pydub; dialogu
 python parley.py                    # or: parley
 ```
 
-- **Opening text**: drop `.txt` or `.md` files anywhere on the window, or use Open…. Several files are
-  joined in name order (`chapter_2` before `chapter_10`). Markdown is turned into readable text:
+- **Opening text**: drop `.txt` or `.md` files (or a folder of them) anywhere on the window, or use
+  Open… / Open folder…. Several files become a **batch**: one MP3 per file, in name order
+  (`chapter_2` before `chapter_10`), all with the same settings. Only the title changes: each file's
+  title is its file name. A switch under the output fields turns this off, and the files are then
+  joined into one text. Files may be UTF-8, UTF-16 or Windows-1252, so umlauts, accents and other
+  scripts survive; speaker names may use any script too (`[Élodie]`, `[Müller]`, `[张伟]`). Markdown is turned into readable text:
   headings become their own paragraph, and formatting marks, links, images, code blocks and HTML
   are removed. A `.md` file that is already a tagged dialogue is opened as it is.
 - **Standard tab**: language, narrator voice (Auto / Female / Male), the text editor and where to save.
   The line under the editor checks the text as you type. It shows the speakers and their voices,
   or any problems with their line number, and problem lines are tinted. It also warns (⚠) when the
   narrator or a speaker uses a `*Multilingual*` voice.
+- **Cover image**: drop a `.jpg` or `.png` on the window (or pick one in Advanced → File info) and
+  every MP3 made gets it as its album cover.
 - **Advanced tab**: a voice and speed / pitch / volume per speaker (▶ previews it), the sounds
   folder with the file found for each `[sound Name]` (or what is missing), dialogue gaps, extra
   outputs (SRT, LRC, shadowing, slow version, clips, WAV), loudness, lexicon file, parallel requests,
@@ -268,7 +274,7 @@ Piano   volume=-6dB fade_out=2   # A piano plays in the corner
 | blank line | ignored |
 | `@voices … @end` | `Role = voice [rate=±N%] [pitch=±NHz] [volume=±N%]`. Roles missing here must come from `--voices`. There is no built-in cast, so an unmapped role is reported as an error. |
 | `@lexicon … @end` | `word = spoken form`. Every whole-word occurrence is sent to TTS respelled, but the subtitles keep the original spelling. A `lexicon.txt` next to the file applies too; the file's own entries win. |
-| `[Role] text` | one utterance. Role names are voice slots (`A`, `Male1`, `Narrator` …), not characters. |
+| `[Role] text` | one utterance. Role names are voice slots (`A`, `Male1`, `Narrator`, `Élodie` …), not characters; any script works. |
 | `[Role mod …] text` | line modifiers: `slow` (rate −20 %), `repeat=N` (1–9, the same clip N times, 700 ms apart), and the raw overrides `rate=±N%`, `pitch=±NHz`, `volume=±N%` (added to the role's values). |
 | `{shown\|spoken}` | inline respelling for one occurrence. |
 | `[pause N]` | N seconds of silence, alone on its line. It replaces the normal turn gap. |

@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
+from ..readtext import read_text
 from .voices import PROSODY_KEYS, VoiceSpec, validate_prosody
 
 # Named line modifiers: name -> (rate %, pitch Hz, volume %) deltas relative to the role's voice.
@@ -36,12 +37,14 @@ MODIFIERS: Dict[str, Tuple[int, int, int]] = {
 SLOW_DELTA = -20  # rate delta for the --slow version
 
 _TAG_LINE = re.compile(r"^\[([^\]]*)\]\s*(.*)$")
-_ROLE_NAME = re.compile(r"^[A-Za-z_][\w]*$")
-_VOICE_LINE = re.compile(r"^([A-Za-z_]\w*)\s*=\s*(\S+)((?:\s+\w+=\S+)*)\s*$")
+# Names may use any script: Élodie, Müller, 张伟, 𓀀 (a letter or _ first, then letters, digits and _).
+ROLE_PATTERN = r"[^\W\d]\w*"
+_ROLE_NAME = re.compile(rf"^{ROLE_PATTERN}$")
+_VOICE_LINE = re.compile(rf"^({ROLE_PATTERN})\s*=\s*(\S+)((?:\s+\w+=\S+)*)\s*$")
 _LEXICON_LINE = re.compile(r"^(.+?)\s*=\s*(.+?)\s*$")
 _INLINE_SAY = re.compile(r"\{([^{}|]+)\|([^{}|]+)\}")
 _CAST_LINE = re.compile(r"^#\s*Cast:\s*(.+)$")
-_SOUND_LINE = re.compile(r'^([A-Za-z_]\w*)(?:\s*=\s*("[^"]+"|[^\s"]+))?((?:\s+\w+=\S+)*)\s*$')
+_SOUND_LINE = re.compile(rf'^({ROLE_PATTERN})(?:\s*=\s*("[^"]+"|[^\s"]+))?((?:\s+\w+=\S+)*)\s*$')
 _SOUND_NOTE = re.compile(r"^(.*?)(?:\s+#\s*(.*))?$")
 _SECONDS = re.compile(r"^(\d+(?:\.\d+)?)s?$")
 _TIME = re.compile(r"^(?:(\d+):([0-5]\d(?:\.\d+)?)|(\d+(?:\.\d+)?)s?)$")
@@ -137,7 +140,7 @@ class Script:
 
 def parse_file(path: Union[str, Path], **kwargs) -> Script:
     path = Path(path)
-    return parse_text(path.read_text(encoding="utf-8-sig"), str(path), **kwargs)
+    return parse_text(read_text(path), str(path), **kwargs)
 
 
 def parse_text(
@@ -377,7 +380,7 @@ def _body_lines(text: str, header: _Header, err, keep_blank: bool = False) -> It
 def load_lexicon(path: Union[str, Path]) -> Dict[str, str]:
     """Read a lexicon file: 'word = spoken form' per line, '#' comments, blank lines ignored."""
     out: Dict[str, str] = {}
-    for n, line in enumerate(Path(path).read_text(encoding="utf-8-sig").splitlines(), 1):
+    for n, line in enumerate(read_text(path).splitlines(), 1):
         s = line.split("#", 1)[0].strip()
         if not s:
             continue

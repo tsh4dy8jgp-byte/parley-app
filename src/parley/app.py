@@ -31,6 +31,7 @@ from .advanced_tab import AdvancedTab
 from .guide import example_for
 from .guide_panel import GuidePanel
 from .model import Model
+from .mp3tags import COVER_EXTENSIONS
 from .standard_tab import StandardTab
 
 PREVIEW_LINES = {
@@ -64,6 +65,8 @@ class ParleyApp(*_BASES):
         self.events: "queue.Queue[jobs.Event]" = queue.Queue()
         self.gen = jobs.Runner(self.events, "generate")
         self.source: Optional[Path] = None           # file the text was opened from / saved to
+        self.batch: List[jobs.BatchItem] = []        # several files, each made into its own MP3 (editor: preview)
+        self._batch_names: List[str] = []            # files of the running batch, for the progress text
         self._save_as: Optional[Path] = None         # Save… default; None once the text differs from a file
         self._drop_hide_job = None
         self.check: Optional[jobs.Check] = None
@@ -220,8 +223,20 @@ class ParleyApp(*_BASES):
     def _drop(self, event):
         self._drop_hide_job = None
         self.standard.show_drop_hint(False)
-        self.open_paths(self.tk.splitlist(event.data))
+        dropped = list(self.tk.splitlist(event.data))
+        images = [p for p in dropped if Path(p).suffix.lower() in COVER_EXTENSIONS]
+        texts = [p for p in dropped if p not in images]
+        if texts or not images:
+            self.open_paths(texts)
+        if images:
+            self.set_cover(images[0], quiet=bool(texts))
         return COPY
+
+    def set_cover(self, path, quiet: bool = False) -> None:
+        """Use an image (dropped or chosen) as the cover of every MP3 made."""
+        self.model["cover"].set(str(path))
+        if not quiet:
+            self.set_status(f"Cover image: {Path(path).name}", "success")
 
     # --- status -------------------------------------------------------------------------------
     def set_status(self, text: str, kind: str = "info") -> None:
@@ -248,9 +263,11 @@ class ParleyApp(*_BASES):
     def validate_now(self) -> None:
         self._validate_job = None
         s = self.model.settings()
-        check = jobs.validate(self.standard.text(), s, self.catalog, self.source)
+        check = self._check(s)
         self.check = check
         self.standard.show_check(check, self.catalog, s, self._narrator_label(s))
+        if self.batch and not check.problems:
+            self.standard.show_batch(jobs.batch_summary(self.batch))
         self.standard.show_language_use(jobs.language_use(check, s, self.catalog), check.detection.mode)
         self.advanced.set_roles(check.detection.roles, check.voices, check.detection.pinned, self.catalog)
         self.advanced.set_mode(check.detection.mode)
@@ -261,10 +278,18 @@ class ParleyApp(*_BASES):
             self.badge.set("")
         elif check.problems:
             self.badge.set(f"{len(check.problems)} problem{'s' * (len(check.problems) > 1)}", "danger")
+        elif self.batch:
+            self.badge.set(f"Batch · {len(self.batch)} files", "accent")
         elif d.mode == "dialogue":
             self.badge.set(f"Dialogue · {len(d.roles)} speaker{'s' * (len(d.roles) != 1)}{sounds}", "accent")
         else:
             self.badge.set(f"Narration{sounds}", "neutral")
+
+    def _check(self, s: st.Settings) -> jobs.Check:
+        """Check the editor's text, or each file of a batch."""
+        if self.batch:
+            return jobs.validate_batch(self.batch, s, self.catalog)
+        return jobs.validate(self.standard.text(), s, self.catalog, self.source)
 
     def _narrator_label(self, s: st.Settings) -> str:
         try:
@@ -294,12 +319,27 @@ class ParleyApp(*_BASES):
         if paths:
             self.open_paths(paths)
 
+    def open_folder(self) -> None:
+        folder = filedialog.askdirectory(title="Open a folder of texts", initialdir=str(self.source.parent)
+                                         if self.source else None)
+        if folder:
+            self.open_paths([folder])
+
     def open_paths(self, paths) -> None:
-        """Open .txt / .md files (several are joined in name order); used by Open… and drag and drop."""
+        """Open .txt / .md files or folders; used by Open…, drag and drop and Open folder….
+
+        Several files become a batch (one MP3 each) unless that is switched off; then they are joined
+        in name order."""
+        if self.model["one_file_each"].get():
+            each, skipped = textfiles.load_each(paths)
+            if len(each) > 1:
+                self._open_batch(each, skipped)
+                return
         loaded = textfiles.load(paths)
         if not loaded.used:
             self.set_status(loaded.summary(), "error")
             return
+        self.batch = []
         self.source = loaded.used[0]
         as_is = len(loaded.used) == 1 and not loaded.cleaned
         self._save_as = self.source if as_is else None
@@ -309,7 +349,25 @@ class ParleyApp(*_BASES):
         self.validate_now()
         self.set_status(loaded.summary(), "info")
 
+    def _open_batch(self, each: List[textfiles.Loaded], skipped: List[Path]) -> None:
+        items = jobs.batch_items([(one.used[0], one.text) for one in each])
+        self.batch = items
+        self.source, self._save_as = items[0].path, None
+        preview = "\n\n".join(f"━━ {i.path.name} ━━\n{i.text.strip()}" for i in items)
+        self.standard.set_text(preview, readonly=True)
+        self.tabs.set("Standard")
+        self.validate_now()
+        msg = f"Opened {len(items)} files, one MP3 each ({items[0].path.name} … {items[-1].path.name})"
+        if any(one.cleaned for one in each):
+            msg += " · Markdown formatting removed"
+        if skipped:
+            msg += " · skipped " + ", ".join(p.name for p in skipped)
+        self.set_status(msg, "info")
+
     def save_file(self) -> None:
+        if self.batch:
+            self.set_status("A batch of files can't be saved as one text: each file stays as it is.", "info")
+            return
         initial = self._save_as.name if self._save_as else f"{jobs.safe_name(self.model['out_name'].get())}.txt"
         path = filedialog.asksaveasfilename(title="Save text", defaultextension=".txt", initialfile=initial,
                                             initialdir=str(self.source.parent) if self.source else None,
@@ -331,6 +389,7 @@ class ParleyApp(*_BASES):
                 "Insert example", "Replace the text in the editor with the example dialogue?\n"
                                   f"(You can undo with {t.MOD_LABEL}Z.)", parent=self):
             return
+        self.batch = []
         self.source = self._save_as = None
         if self.model["out_name"].get() in ("", "untitled"):
             self.model["out_name"].set("example_dialogue")
@@ -339,6 +398,7 @@ class ParleyApp(*_BASES):
         self.validate_now()
 
     def clear_text(self) -> None:
+        self.batch = []
         self.standard.set_text("")
         self.source = self._save_as = None
         self.standard.editor.focus_set()
@@ -356,14 +416,34 @@ class ParleyApp(*_BASES):
     def generate(self) -> None:
         if self.gen.busy:
             return
-        text = self.standard.text()
         s = self.model.settings()
-        check = jobs.validate(text, s, self.catalog, self.source)
-        mode = check.detection.mode
-        if mode == "empty":
-            self.set_status("Nothing to read yet: paste some text or insert the example dialogue.", "error")
-            return
-        mixing = mode == "dialogue" or bool(check.detection.sounds)
+        self._batch_names = []
+        if self.batch:
+            items = list(self.batch)
+            todo = jobs.batch_todo(items)
+            if not todo:
+                self.set_status("Nothing to read yet: every file is empty.", "error")
+                return
+            check, mixing = jobs.validate_batch(items, s, self.catalog), jobs.needs_mixing(items)
+            planned = jobs.planned_batch_outputs(items, s)
+            names = [i.path.name for i, _ in todo]
+            self._unit = "files"
+            start = lambda p: jobs.run_batch(items, s, self.catalog, p)  # noqa: E731
+        else:
+            text = self.standard.text()
+            check = jobs.validate(text, s, self.catalog, self.source)
+            mode = check.detection.mode
+            if mode == "empty":
+                self.set_status("Nothing to read yet: paste some text or insert the example dialogue.", "error")
+                return
+            mixing = mode == "dialogue" or bool(check.detection.sounds)
+            planned, names, source = jobs.planned_outputs(s, mode), [], self.source
+            if mode == "dialogue":
+                self._unit = "lines"
+                start = lambda p: jobs.run_dialogue(text, s, self.catalog, p, source=source)  # noqa: E731
+            else:
+                self._unit = "parts"
+                start = lambda p: jobs.run_narration(text, s, self.catalog, p, source=source)  # noqa: E731
         if mixing:
             hint = system.dialogue_ready()
             if hint:
@@ -372,9 +452,11 @@ class ParleyApp(*_BASES):
             if check.problems:
                 self.validate_now()
                 self.tabs.set("Standard")
-                line = check.problems[0][0]
+                line, msg = check.problems[0]
                 self.standard.goto_line(line)
-                self.set_status(f"Fix the problems in the text first{f' (line {line})' if line else ''}.", "error")
+                where = f" (line {line})" if line else ""
+                self.set_status(f"Fix the problems in the text first{where}." if not self.batch
+                                else f"Fix the problems first: {msg}", "error")
                 return
         if (problem := jobs.cover_problem(s)):
             self.tabs.set("Advanced")
@@ -386,21 +468,16 @@ class ParleyApp(*_BASES):
         except OSError as e:
             self.set_status(f"Can't create the output folder: {e}", "error")
             return
-        existing = [p for p in jobs.planned_outputs(s, mode) if p.exists()]
+        existing = [p for p in planned if p.exists()]
         if existing and not messagebox.askyesno(
                 "Replace files?", f"These files already exist in {out_dir}:\n\n"
                                   + "\n".join(p.name for p in existing[:6])
                                   + ("\n…" if len(existing) > 6 else "") + "\n\nReplace them?", parent=self):
             return
         st.save(s)
-        source = self.source
-        self._mixing = mixing
-        if mode == "dialogue":
-            self._unit = "lines"
-            self.gen.start(lambda p: jobs.run_dialogue(text, s, self.catalog, p, source=source))
-        else:
-            self._unit = "parts"
-            self.gen.start(lambda p: jobs.run_narration(text, s, self.catalog, p, source=source))
+        self._mixing = mixing and not self.batch
+        self._batch_names = names
+        self.gen.start(start)
         self._t0 = time.perf_counter()
         self._set_running(True)
         self.set_status("Connecting to the voice service…", "info")
@@ -422,7 +499,7 @@ class ParleyApp(*_BASES):
     def preview_speaker(self, role: str) -> None:
         # Check afresh (not the debounced result) so a slider moved a moment ago is heard.
         s = self.model.settings()
-        check = jobs.validate(self.standard.text(), s, self.catalog, self.source)
+        check = self._check(s)
         spec = check.voices.get(role)
         if spec is None:                                      # a speaker added in Advanced, not in the text
             roles = check.detection.roles + [role]
@@ -485,7 +562,10 @@ class ParleyApp(*_BASES):
         if ev.type == "progress":
             done, total = ev.payload
             self.progress.set(done / max(total, 1))
-            if done == total and self._mixing:
+            if self._batch_names:
+                k = min(done // jobs.BATCH_STEPS, len(self._batch_names) - 1)
+                self.set_status(f"File {k + 1} of {len(self._batch_names)} · {self._batch_names[k]}…", "info")
+            elif done == total and self._mixing:
                 self.set_status(f"Synthesised {total} {self._unit} · mixing audio…", "info")
             else:
                 self.set_status(f"Synthesising {done} / {total} {self._unit}…", "info")
@@ -519,7 +599,8 @@ class ParleyApp(*_BASES):
             self.gen.join(3)
         try:
             st.save(self.model.settings())
-            st.save_draft(self.standard.text())
+            if not self.batch:      # the editor then only shows a preview of the files
+                st.save_draft(self.standard.text())
         except OSError:
             pass
         system.stop(self._player)

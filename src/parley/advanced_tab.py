@@ -199,7 +199,8 @@ class AdvancedTab(ctk.CTkScrollableFrame):
 
         # File info ----------------------------------------------------------------------------
         b = self._card(5, "File info", "MP3 tags so a music app can sort and show the files. Artist and album "
-                          "are on the Standard tab. Empty fields are left out.").body
+                          "are on the Standard tab. Empty fields are left out. With several files, the "
+                          "settings apply to all of them and each title is its file name.").body
         b.grid_columnconfigure(1, weight=1)
         for i, (key, text, hint) in enumerate([
                 ("title", "Title", "empty: the file name"), ("album_artist", "Album artist", ""),
@@ -211,6 +212,8 @@ class AdvancedTab(ctk.CTkScrollableFrame):
         w.PathPicker(b, m["cover"], kind="file", title="Cover image",
                      filetypes=(("Images", "*.jpg *.jpeg *.png"), ("All files", "*")), clearable=True).grid(
             row=6, column=1, sticky="ew", padx=(8, 0), pady=3)
+        w.caption(b, "Or drop a .jpg / .png on the window. Every file made gets this cover.").grid(
+            row=7, column=1, sticky="w", padx=(8, 0))
 
         # Pronunciation & parsing --------------------------------------------------------------
         b = self._card(6, "Pronunciation & parsing").body

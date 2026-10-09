@@ -15,6 +15,7 @@ from mutagen.id3 import APIC, COMM, ID3, TALB, TCON, TDRC, TIT2, TPE1, TPE2, TRC
 DEFAULT_ARTIST = "Parley"
 DEFAULT_ALBUM = "Parley"
 DEFAULT_GENRE = "Speech"
+COVER_EXTENSIONS = (".jpg", ".jpeg", ".png")
 
 
 @dataclass(frozen=True)
@@ -90,6 +91,6 @@ def read_cover_error(tags: Tags) -> Optional[str]:
     p = Path(tags.cover).expanduser()
     if not p.is_file():
         return f"cover image not found: {p}"
-    if p.suffix.lower() not in (".jpg", ".jpeg", ".png"):
+    if p.suffix.lower() not in COVER_EXTENSIONS:
         return "cover image must be a .jpg or .png file"
     return None

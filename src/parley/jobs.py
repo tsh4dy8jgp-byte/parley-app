@@ -18,8 +18,8 @@ from typing import Any, Awaitable, Callable, Dict, List, Optional, Tuple
 from .audiobook.chunker import split_text
 from .audiobook.voices import is_multilingual, multilingual_warning
 from .dialog_tts.render import RenderOptions, render_scripts
-from .dialog_tts.script import (_ROLE_NAME, _TAG_LINE, Script, ScriptError, load_lexicon, parse_narration,
-                                parse_text)
+from .dialog_tts.script import (_ROLE_NAME, _TAG_LINE, ROLE_PATTERN, Script, ScriptError, load_lexicon,
+                                parse_narration, parse_text)
 from .dialog_tts.sounds import DEFAULT_DIR, SoundFile, attach_sounds, find_sounds
 from .dialog_tts.stitch import Gaps
 from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend
@@ -42,7 +42,7 @@ class Detection:
     sounds: List[str] = field(default_factory=list)   # [sound Name] names in order of first use
 
 
-_PINNED = re.compile(r"^([A-Za-z_]\w*)\s*=")
+_PINNED = re.compile(rf"^({ROLE_PATTERN})\s*=")
 
 
 def detect(text: str) -> Detection:
@@ -330,6 +330,100 @@ def planned_outputs(settings: Settings, mode: str) -> List[Path]:
     suffixes = [""] + [".shadow"] * settings.shadow + [".slow"] * settings.slow
     exts = [".mp3"] + [".wav"] * settings.wav + [".srt"] * settings.srt + [".lrc"] * settings.lrc
     return [out / f"{stem}{sfx}{ext}" for sfx in suffixes for ext in exts]
+
+
+# --- several files: one MP3 each ------------------------------------------------------------------
+
+BATCH_STEPS = 1000      # progress of one file in a batch; the app turns (done, total) into "file k of n"
+
+
+@dataclass
+class BatchItem:
+    path: Path
+    text: str
+    name: str          # output file stem, unique within the batch
+
+
+def batch_items(files: List[Tuple[Path, str]]) -> List[BatchItem]:
+    """(path, text) pairs as batch items; two files with the same stem (a.txt, a.md) get _2, _3, …"""
+    items: List[BatchItem] = []
+    used: set = set()
+    for path, text in files:
+        base = safe_name(Path(path).name)
+        name, n = base, 1
+        while name.casefold() in used:
+            n += 1
+            name = f"{base}_{n}"
+        used.add(name.casefold())
+        items.append(BatchItem(Path(path), text, name))
+    return items
+
+
+def item_settings(settings: Settings, item: BatchItem) -> Settings:
+    """The shared settings for one file: only the output name and the title (= the file name) change."""
+    return replace(settings, out_name=item.name, title="")
+
+
+def batch_todo(items: List[BatchItem]) -> List[Tuple[BatchItem, str]]:
+    """The items that have text, with their mode ("narration" | "dialogue")."""
+    found = [(i, detect(i.text).mode) for i in items]
+    return [(i, mode) for i, mode in found if mode != "empty"]
+
+
+def needs_mixing(items: List[BatchItem]) -> bool:
+    """True if any file is a dialogue or has [sound Name] lines (those need ffmpeg)."""
+    return any(mode == "dialogue" or detect(i.text).sounds for i, mode in batch_todo(items))
+
+
+def batch_summary(items: List[BatchItem]) -> str:
+    modes = Counter(mode for _, mode in batch_todo(items))
+    parts = [f"{n} {mode}{'s' * (n > 1)}" for mode, n in modes.items()]
+    return f"{len(items)} files" + (" · " + ", ".join(parts) if parts else "")
+
+
+def validate_batch(items: List[BatchItem], settings: Settings, catalog: Catalog) -> Check:
+    """Check every file on its own. The result describes the joined texts (for the speakers and sounds
+    panels), but its problems are those of the single files, named by file."""
+    check = validate("\n\n".join(i.text for i in items), settings, catalog, items[0].path)
+    check.problems = []
+    for item in items:
+        one = validate(item.text, item_settings(settings, item), catalog, item.path)
+        for n, msg in one.problems:
+            check.problems.append((0, f"{item.path.name}{f', line {n}' if n else ''}: {msg}"))
+    return check
+
+
+def planned_batch_outputs(items: List[BatchItem], settings: Settings) -> List[Path]:
+    return [p for item, mode in batch_todo(items) for p in planned_outputs(item_settings(settings, item), mode)]
+
+
+async def run_batch(items: List[BatchItem], settings: Settings, catalog: Catalog,
+                    on_progress: Optional[Progress] = None,
+                    backend: Optional[Backend] = None) -> List[Tuple[Path, int]]:
+    """One MP3 per file, in order, all with the same settings. Progress is (done, total) with
+    BATCH_STEPS per file. A failure names the file; the files before it stay written."""
+    todo = batch_todo(items)
+    if not todo:
+        raise ValueError("Every file is empty.")
+    backend = backend or make_backend(settings)
+    written: List[Tuple[Path, int]] = []
+    total = len(todo) * BATCH_STEPS
+    for k, (item, mode) in enumerate(todo):
+        def progress(done: int, n: int, k: int = k) -> None:
+            if on_progress:
+                on_progress(k * BATCH_STEPS + done * BATCH_STEPS // max(n, 1), total)
+
+        s = item_settings(settings, item)
+        try:
+            if mode == "dialogue":
+                written += await run_dialogue(item.text, s, catalog, progress, backend, source=item.path)
+            else:
+                written += await run_narration(item.text, s, catalog, progress, source=item.path, backend=backend)
+        except ScriptError as e:
+            raise RuntimeError(f"{item.path.name}: {gui_message(str(e).splitlines()[0])}") from e
+        except Exception as e:  # noqa: BLE001 - reported to the user
+            raise RuntimeError(f"{item.path.name}: {e}") from e
+    return written
 
 
 def estimate_minutes(words: int) -> float:

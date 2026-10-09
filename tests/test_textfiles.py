@@ -85,3 +85,21 @@ def test_dialogue_example_inside_a_code_block_does_not_count(tmp_path):
     (tmp_path / "readme.md").write_text(doc, encoding="utf-8")
     got = load([tmp_path / "readme.md"])
     assert got.cleaned and got.text == "Format\n\nWrite one line per turn:"
+
+
+def test_folders_and_load_each(tmp_path):
+    from parley.textfiles import load_each
+
+    (tmp_path / "ch10.txt").write_text("Ten.", encoding="utf-8")
+    (tmp_path / "ch2.md").write_text("# Two", encoding="utf-8")
+    (tmp_path / "cover.png").write_bytes(b"\x89PNG")
+    (tmp_path / "empty").mkdir()
+    each, skipped = load_each([tmp_path, tmp_path / "empty"])
+    assert [(o.used[0].name, o.text) for o in each] == [("ch2.md", "Two"), ("ch10.txt", "Ten.")]
+    assert [p.name for p in skipped] == ["empty"]
+    assert load([tmp_path]).text == "Two\n\nTen."                       # joined: same folder, same order
+
+
+def test_read_text_utf16(tmp_path):
+    (tmp_path / "u.txt").write_bytes("Grüße 𓀀".encode("utf-16"))
+    assert read_text(tmp_path / "u.txt") == "Grüße 𓀀"
