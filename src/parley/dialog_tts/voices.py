@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Dict, Iterable, List, Mapping, Optional
 
 from ..audiobook.voices import is_multilingual, multilingual_warning
+from ..readtext import read_text
 
 RATE_RE = re.compile(r"^[+-]\d{1,3}%$")
 VOLUME_RE = RATE_RE
@@ -83,7 +84,7 @@ def parse_voice_entry(value) -> VoiceSpec:
 def load_voices_yaml(path: Path) -> Dict[str, VoiceSpec]:
     import yaml
 
-    data = yaml.safe_load(Path(path).read_text(encoding="utf-8")) or {}
+    data = yaml.safe_load(read_text(path)) or {}
     if not isinstance(data, Mapping):
         raise ValueError(f"{path}: expected a mapping of role -> voice")
     data = data.get("voices", data)

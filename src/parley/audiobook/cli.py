@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
+from ..readtext import read_text as read_file
 from .builder import build_audiobook, print_progress
 from .chunker import DEFAULT_CHUNK_SIZE
 from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
@@ -76,7 +77,7 @@ def read_text(source: str) -> str:
     path = Path(source)
     if not path.is_file():
         raise SystemExit(f"error: input file not found: {path}")
-    return path.read_text(encoding="utf-8")
+    return read_file(path)
 
 
 async def run(args: argparse.Namespace) -> None:

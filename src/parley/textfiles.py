@@ -5,9 +5,10 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Iterable, List, Set, Union
+from typing import Iterable, List, Set, Tuple, Union
 
 from .jobs import detect
+from .readtext import read_text
 
 SUPPORTED = (".txt", ".md", ".markdown")
 MARKDOWN = (".md", ".markdown")
@@ -35,11 +36,43 @@ class Loaded:
         return msg
 
 
+def expand(paths: Iterable[Union[str, Path]]) -> List[Path]:
+    """The given paths with every folder replaced by the supported files directly inside it."""
+    out: List[Path] = []
+    for p in paths:
+        path = Path(p).expanduser()
+        if path.is_dir():
+            try:
+                inside = [c for c in path.iterdir() if c.suffix.lower() in SUPPORTED and c.is_file()]
+            except OSError:
+                inside = []
+            out += inside or [path]      # nothing usable inside: the folder itself is reported as skipped
+        else:
+            out.append(path)
+    return out
+
+
+def load_each(paths: Iterable[Union[str, Path]]) -> Tuple[List[Loaded], List[Path]]:
+    """Like `load`, but one `Loaded` per file (natural name order) instead of one joined text;
+    also returns the paths that were skipped."""
+    each: List[Loaded] = []
+    skipped: List[Path] = []
+    for path in sorted(expand(paths), key=_natural):
+        one = load([path])
+        if one.used:
+            each.append(one)
+        else:
+            skipped += one.skipped
+    return each, skipped
+
+
 def load(paths: Iterable[Union[str, Path]]) -> Loaded:
-    """Read the supported files in natural name order (ch2 before ch10) and join them."""
+    """Read the supported files in natural name order (ch2 before ch10) and join them.
+
+    A folder stands for the supported files directly inside it."""
     out = Loaded()
     parts = []
-    for path in sorted((Path(p).expanduser() for p in paths), key=_natural):
+    for path in sorted(expand(paths), key=_natural):
         if path.suffix.lower() not in SUPPORTED or not path.is_file():
             out.skipped.append(path)
             continue
@@ -58,17 +91,6 @@ def load(paths: Iterable[Union[str, Path]]) -> Loaded:
             parts.append(text.strip())
     out.text = "\n\n".join(parts)
     return out
-
-
-def read_text(path: Union[str, Path]) -> str:
-    """UTF-8 (with or without BOM), else Windows-1252, else Latin-1 (never fails)."""
-    data = Path(path).read_bytes()
-    for encoding in ("utf-8-sig", "cp1252"):
-        try:
-            return data.decode(encoding)
-        except UnicodeDecodeError:
-            pass
-    return data.decode("latin-1")
 
 
 def _natural(path: Path):

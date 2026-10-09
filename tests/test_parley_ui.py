@@ -104,6 +104,7 @@ class DropEvent:
 
 
 def test_drop_joins_files_and_cleans_markdown(app, tmp_path):
+    app.model["one_file_each"].set(False)
     folder = tmp_path / "my books"
     folder.mkdir()
     (folder / "chapter 2.md").write_text("# Two\nSome **bold** text.", encoding="utf-8")
@@ -116,11 +117,47 @@ def test_drop_joins_files_and_cleans_markdown(app, tmp_path):
 
 
 def test_drop_rejects_unsupported_files(app, tmp_path):
-    (tmp_path / "photo.png").write_bytes(b"\x89PNG")
+    (tmp_path / "sheet.docx").write_bytes(b"PK")
     app.standard.set_text("keep me")
-    app._drop(DropEvent(str(tmp_path / "photo.png")))
+    app._drop(DropEvent(str(tmp_path / "sheet.docx")))
     assert app.standard.text() == "keep me"
-    assert app.status.cget("text").startswith("Nothing opened") and "skipped photo.png" in app.status.cget("text")
+    assert app.status.cget("text").startswith("Nothing opened") and "skipped sheet.docx" in app.status.cget("text")
+
+
+def test_dropped_image_becomes_the_cover(app, tmp_path):
+    (tmp_path / "art.png").write_bytes(b"\x89PNG")
+    app.standard.set_text("keep me")
+    app._drop(DropEvent(f"{{{tmp_path / 'art.png'}}}"))
+    assert app.model["cover"].get() == str(tmp_path / "art.png")
+    assert app.standard.text() == "keep me" and app.status.cget("text") == "Cover image: art.png"
+    (tmp_path / "t.txt").write_text("Hello.", encoding="utf-8")
+    (tmp_path / "b.jpg").write_bytes(b"\xff\xd8")
+    app._drop(DropEvent(f"{{{tmp_path / 't.txt'}}} {{{tmp_path / 'b.jpg'}}}"))         # text and image together
+    assert app.standard.text() == "Hello." and app.model["cover"].get() == str(tmp_path / "b.jpg")
+
+
+def test_several_files_become_a_batch_with_one_mp3_each(app, tmp_path, fake, monkeypatch):
+    folder = tmp_path / "course"
+    folder.mkdir()
+    for n in (1, 2, 3):
+        (folder / f"text{n}.tagged.txt").write_text(f"[A] Lesson {n}.\n[B] Yes.", encoding="utf-8")
+    app.model["out_dir"].set(str(tmp_path / "out"))
+    app.model["cache_dir"].set(str(tmp_path / "cache"))
+    app.model["title"].set("ignored in a batch")
+    app.open_paths([folder])
+    app.update()
+    assert [i.name for i in app.batch] == ["text1", "text2", "text3"]
+    assert app.badge.cget("text").strip() == "Batch · 3 files"
+    assert "━━ text2.tagged.txt ━━" in app.standard.text() and app.standard.editor.cget("state") == "disabled"
+    monkeypatch.setattr(ui.jobs, "make_backend", lambda *_a, **_k: fake)
+    monkeypatch.setattr(ui.system, "dialogue_ready", lambda: None)
+    app.generate()
+    app.gen.join(30)
+    app._poll()
+    assert sorted(p.name for p in (tmp_path / "out").glob("*.mp3")) == ["text1.mp3", "text2.mp3", "text3.mp3"]
+    assert app.status.cget("text").startswith("Done")
+    app.clear_text()
+    assert app.batch == [] and app.standard.editor.cget("state") == "normal"
 
 
 def test_single_txt_keeps_its_name_for_save(app, tmp_path):

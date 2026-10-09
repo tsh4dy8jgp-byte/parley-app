@@ -469,3 +469,107 @@ def test_run_dialogue_with_a_sound(tmp_path, fake, catalog):
                                             source=tmp_path / "talk.txt"))
     assert [p.name for p, _ in written] == ["talk.mp3", "talk.srt"]
     assert "♪ Bell" in (tmp_path / "out/talk.srt").read_text(encoding="utf-8")
+
+
+# --- several files, one MP3 each ---------------------------------------------------------------
+
+def test_batch_items_get_unique_names(tmp_path):
+    items = jobs.batch_items([(tmp_path / "text1.tagged.txt", "a"), (tmp_path / "Text1.md", "b"),
+                              (tmp_path / "text2.txt", "c")])
+    assert [i.name for i in items] == ["text1", "Text1_2", "text2"]
+
+
+def test_run_batch_makes_one_titled_mp3_per_file(tmp_path, fake, catalog):
+    from mutagen.id3 import ID3
+
+    items = jobs.batch_items([(tmp_path / "text1.tagged.txt", "[A] Hello there.\n[B] Hi!"),
+                              (tmp_path / "text2.tagged.txt", "[A] Second text."),
+                              (tmp_path / "empty.txt", "  "),
+                              (tmp_path / "text3.tagged.txt", "[B] Third one, in the same voice.")])
+    cover = tmp_path / "cover.png"
+    cover.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\0" * 20)
+    s = st.Settings(language="en-US", out_dir=str(tmp_path / "out"), out_name="ignored", title="Typed title",
+                    artist="Me", album="Course", cover=str(cover), srt=True, cache_dir=str(tmp_path / "cache"))
+    seen = []
+    written = asyncio.run(jobs.run_batch(items, s, catalog, lambda d, t: seen.append((d, t)), backend=fake))
+    mp3s = [p.name for p, _ in written if p.suffix == ".mp3"]
+    assert mp3s == ["text1.mp3", "text2.mp3", "text3.mp3"]                     # the empty file is skipped
+    assert [p.name for p in jobs.planned_batch_outputs(items, s)] == [p.name for p, _ in written]
+    assert seen[-1] == (3 * jobs.BATCH_STEPS, 3 * jobs.BATCH_STEPS)
+    assert [d // jobs.BATCH_STEPS for d, _ in seen][0] == 0
+    for name in ("text1", "text2", "text3"):
+        tags = ID3(tmp_path / "out" / f"{name}.mp3")
+        assert tags["TIT2"].text[0] == name                      # the title changes per file …
+        assert (tags["TPE1"].text[0], tags["TALB"].text[0]) == ("Me", "Course")   # … the rest is shared
+        assert tags["APIC:Cover"].data.startswith(b"\x89PNG")
+
+
+def test_run_batch_names_the_failing_file(tmp_path, fake, catalog):
+    items = jobs.batch_items([(tmp_path / "ok.txt", "[A] Fine."), (tmp_path / "bad.txt", "[A] Hi\n[sound Nope]")])
+    s = st.Settings(language="en-US", out_dir=str(tmp_path / "out"), cache_dir=str(tmp_path / "cache"))
+    problems = jobs.validate_batch(items, s, catalog).problems
+    assert len(problems) == 1 and problems[0][1].startswith("bad.txt, line 2: ")
+    with pytest.raises(RuntimeError, match="^bad.txt: "):
+        asyncio.run(jobs.run_batch(items, s, catalog, backend=fake))
+    assert (tmp_path / "out/ok.mp3").exists()                    # the file before it stays
+
+
+def test_validate_batch_checks_each_file_on_its_own(tmp_path, catalog):
+    first = "@voices\nA = en-US-GuyNeural\n@end\n[A] Hi"
+    second = "[A] Hi"                                    # A has no @voices here: still fine (automatic voice)
+    items = jobs.batch_items([(tmp_path / "a.txt", first), (tmp_path / "b.txt", second)])
+    assert jobs.validate_batch(items, st.Settings(), catalog).problems == []
+    assert jobs.batch_summary(items) == "2 files · 2 dialogues"
+    assert jobs.batch_summary(jobs.batch_items([(tmp_path / "n.txt", "Plain prose."), (tmp_path / "e.txt", "")])) \
+        == "2 files · 1 narration"
+
+
+# --- names and files in any script -------------------------------------------------------------
+
+UNICODE = ("@voices\nZoë = en-US-AvaNeural\nÉlodie = en-US-AriaNeural\nMüller = en-US-GuyNeural\n"
+           "𓀀 = en-US-AndrewMultilingualNeural\n张伟 = en-GB-SoniaNeural\n@end\n"
+           "[Zoë] Où est la gare ? Çà et là.\n[Élodie] Très bien, à bientôt !\n[Müller] Schöne Grüße, Straße.\n"
+           "[𓀀] 𓂀𓃾 hello\n[张伟] 你好\n")
+
+
+def test_roles_may_use_any_script(catalog):
+    d = jobs.detect(UNICODE)
+    assert d.roles == ["Zoë", "Élodie", "Müller", "𓀀", "张伟"] and d.pinned == d.roles
+    s = parse_text(UNICODE)
+    assert [u.role for u in s.utterances] == d.roles
+    assert s.utterances[3].text == "𓂀𓃾 hello"
+    assert st.ROLE_NAME.match("Élodie") and not st.ROLE_NAME.match("1abc")
+
+
+def test_files_in_other_encodings_are_read(tmp_path):
+    from parley.dialog_tts.script import load_lexicon, parse_file
+
+    body = "@voices\nA = en-US-AvaNeural\n@end\n[A] Grüße, café – naïve.\n"
+    for name, encoding in (("utf8.txt", "utf-8"), ("bom.txt", "utf-8-sig"), ("win.txt", "cp1252"),
+                           ("u16.txt", "utf-16")):
+        (tmp_path / name).write_bytes(body.encode(encoding))
+        assert parse_file(tmp_path / name).utterances[0].text == "Grüße, café – naïve.", name
+    (tmp_path / "lex.txt").write_bytes("Müll = Mühl\n".encode("cp1252"))
+    assert load_lexicon(tmp_path / "lex.txt") == {"Müll": "Mühl"}
+
+
+def test_unicode_dialogue_renders_with_tags_and_subtitles(tmp_path, fake):
+    from mutagen.id3 import ID3
+
+    from parley.dialog_tts.render import RenderOptions, render_scripts
+    from parley.mp3tags import Tags
+
+    script = parse_text(UNICODE, "Übung_1.tagged.txt")
+    opts = RenderOptions(srt=True, tags=Tags(title="Übung – 𓀀 日本語", album="Café", comment="Grüße"))
+    written = asyncio.run(render_scripts([script], fake, tmp_path, opts))
+    assert [p.name for p, _ in written] == ["Übung_1.mp3", "Übung_1.srt"]
+    tags = ID3(tmp_path / "Übung_1.mp3")
+    assert tags["TIT2"].text[0] == "Übung – 𓀀 日本語" and tags["TALB"].text[0] == "Café"
+    assert "𓀀: 𓂀𓃾 hello" in (tmp_path / "Übung_1.srt").read_text(encoding="utf-8")
+
+
+# --- cover -------------------------------------------------------------------------------------
+
+def test_cover_extensions_are_shared():
+    from parley.mp3tags import COVER_EXTENSIONS
+    assert COVER_EXTENSIONS == (".jpg", ".jpeg", ".png")

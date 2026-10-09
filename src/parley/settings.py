@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Dict, Optional, Union
 
 from .audiobook.chunker import DEFAULT_CHUNK_SIZE
+from .dialog_tts.script import ROLE_PATTERN
 from .dialog_tts.voices import VoiceSpec
 from .mp3tags import DEFAULT_ALBUM, DEFAULT_ARTIST, DEFAULT_GENRE
 
@@ -18,7 +19,7 @@ CONFIG_DIR = Path(os.environ.get("PARLEY_HOME") or Path.home() / ".config" / "pa
 CACHE_DIR = Path.home() / ".cache" / "parley"
 SETTINGS_FILE = CONFIG_DIR / "settings.json"
 DRAFT_FILE = CONFIG_DIR / "draft.txt"
-ROLE_NAME = re.compile(r"^[A-Za-z_]\w*$")   # same rule as the dialogue parser
+ROLE_NAME = re.compile(rf"^{ROLE_PATTERN}$")   # same rule as the dialogue parser
 
 # Folders used while the app was called TTS Studio; `migrate_legacy` moves them once.
 LEGACY_CONFIG_DIR = Path.home() / ".config" / "tts-studio"
@@ -84,6 +85,8 @@ class Settings:
     # Pronunciation & parsing
     lexicon: str = ""
     continue_speaker: bool = False
+    # Opening several files: one MP3 per file (off: the texts are joined into one)
+    one_file_each: bool = True
     # Sounds: folder of the files for [sound Name] lines ("" = sounds/ next to the opened file)
     sounds_dir: str = ""
     # Performance

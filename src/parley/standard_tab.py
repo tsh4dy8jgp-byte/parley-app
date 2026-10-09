@@ -71,10 +71,11 @@ class StandardTab(ctk.CTkFrame):
         e.grid_columnconfigure(0, weight=1)
         e.grid_rowconfigure(1, weight=1)
         bar = ctk.CTkFrame(e, fg_color="transparent")
-        bar.grid(row=0, column=0, columnspan=4, sticky="ew", pady=(0, 8))
+        bar.grid(row=0, column=0, columnspan=5, sticky="ew", pady=(0, 8))
         bar.grid_columnconfigure(0, weight=1)
         w.label(bar, "Text", size=14, weight="bold").grid(row=0, column=0, sticky="w")
-        for col, (text, cmd) in enumerate([("Open…", app.open_file), ("Save…", app.save_file),
+        for col, (text, cmd) in enumerate([("Open…", app.open_file), ("Open folder…", app.open_folder),
+                                           ("Save…", app.save_file),
                                            ("Insert example", app.insert_example), ("Clear", app.clear_text)], 1):
             w.ghost(bar, text, cmd).grid(row=0, column=col, padx=(6, 0))
 
@@ -86,7 +87,7 @@ class StandardTab(ctk.CTkFrame):
                                         anchor="nw", justify="left", fg_color="transparent")
         self.placeholder.bind("<Button-1>", lambda _e: self.editor.focus_set())
         self.set_drop_enabled(False)
-        self.drop_hint = ctk.CTkLabel(self.editor, text="  Drop .txt or .md files to open  ", height=44,
+        self.drop_hint = ctk.CTkLabel(self.editor, text="  Drop .txt / .md files or a folder to open  ", height=44,
                                       corner_radius=10, fg_color=t.ACCENT_SOFT, text_color=t.ACCENT,
                                       font=t.font(15, "bold"))
         self.editor.bind("<<Modified>>", self._modified)
@@ -113,6 +114,8 @@ class StandardTab(ctk.CTkFrame):
         w.entry(o, app.model["album"], width=180).grid(row=1, column=3, sticky="ew", pady=(10, 0))
         w.caption(o, "Shown in your music app. More tags (genre, year, cover…) are in Advanced.").grid(
             row=2, column=1, columnspan=3, sticky="w", pady=(4, 0))
+        w.switch(o, "Several files opened at once: make one MP3 per file (off: join them into one text)",
+                 app.model["one_file_each"]).grid(row=3, column=0, columnspan=5, sticky="w", pady=(10, 0))
 
         self.configure_tags()
 
@@ -120,12 +123,16 @@ class StandardTab(ctk.CTkFrame):
     def text(self) -> str:
         return self.editor.get("1.0", "end-1c")
 
-    def set_text(self, text: str) -> None:
+    def set_text(self, text: str, readonly: bool = False) -> None:
+        """Replace the editor's text; *readonly* shows it without letting it be edited (a batch preview)."""
+        self.editor.configure(state="normal")
         self.editor.delete("1.0", "end")
         self.editor.insert("1.0", text)
         self.editor.edit_separator()
         self.editor.mark_set("insert", "1.0")
         self.editor.see("1.0")
+        if readonly:
+            self.editor.configure(state="disabled")
         self._modified()
 
     def _modified(self, _event=None) -> None:
@@ -263,6 +270,12 @@ class StandardTab(ctk.CTkFrame):
             self._status(f"Dialogue · {len(check.voices)} speakers · {lines} lines{sounds}   ·   {cast}{more}{warn}",
                          t.WARNING if warn else t.MUTED)
         self.highlight(check)
+
+    def show_batch(self, summary: str) -> None:
+        """Status line for several files that are each made into an MP3 (when none has a problem)."""
+        self._first_problem = 0
+        self._status(f"Batch · {summary} · one MP3 per file, same settings, each titled by its file name.",
+                     t.MUTED)
 
     def _status(self, text: str, color, link: bool = False) -> None:
         self.status.configure(text=text, text_color=color, cursor="hand2" if link else "")
