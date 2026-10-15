@@ -11,6 +11,7 @@ import tempfile
 from pathlib import Path
 from typing import Dict, Optional, Protocol, Tuple
 
+from ..tts_errors import TTSError, describe_tts_error
 from .voices import VoiceSpec
 
 
@@ -52,8 +53,8 @@ class EdgeBackend:
                     last = e
                     if attempt < self.retries:
                         await asyncio.sleep(self.backoff * 2 ** (attempt - 1) + random.random())
-        raise RuntimeError(f"TTS failed after {self.retries} attempts for {spec.voice} "
-                           f"{text[:40]!r}: {last}")
+        raise TTSError(f"TTS failed after {self.retries} attempts for {spec.voice} "
+                       f"{text[:40]!r}: {describe_tts_error(last)}") from last
 
 
 def cache_key(text: str, spec: VoiceSpec) -> str:

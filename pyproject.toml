@@ -9,7 +9,7 @@ description = "Parley: from one narrator to a full cast. Audiobooks and multi-vo
 readme = "README.md"
 requires-python = ">=3.9"
 dependencies = [
-    "edge-tts>=7.2.0",
+    "edge-tts @ git+https://github.com/rany2/edge-tts.git@bd44c1d1aaebdc1db7f47456ee12431b42ec7cac",
     "mutagen>=1.47",
 ]
 

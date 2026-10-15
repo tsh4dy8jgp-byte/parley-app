@@ -10,6 +10,7 @@ from pathlib import Path
 
 from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from ..readtext import read_text as read_file
+from ..tts_errors import TTSError
 from .builder import build_audiobook, print_progress
 from .chunker import DEFAULT_CHUNK_SIZE
 from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
@@ -128,6 +129,8 @@ def main() -> None:
         asyncio.run(run(args))
     except KeyboardInterrupt:
         raise SystemExit(130)
+    except TTSError as error:
+        raise SystemExit(f"error: {error}") from None
 
 
 if __name__ == "__main__":

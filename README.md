@@ -24,6 +24,18 @@ pip install -e ".[gui]"     # the desktop app; `pip install -e .` is enough for 
 Dialogues also need ffmpeg on PATH (`brew install ffmpeg`, `sudo apt install ffmpeg` or
 `winget install Gyan.FFmpeg`). The ready-made app below has it built in.
 
+Parley pins edge-tts to upstream commit
+[`bd44c1d`](https://github.com/rany2/edge-tts/commit/bd44c1d1aaebdc1db7f47456ee12431b42ec7cac),
+including Sec-MS-GEC v2 authentication and server-date parsing fixes. Installing from source
+requires Git and access to GitHub. To update an existing source installation after pulling
+Parley's changes, run `python -m pip install --upgrade -e ".[gui]"` (or `-e .` for audiobook only).
+
+If speech fails with HTTP 403, check your system date/time and network or proxy access to
+Microsoft's speech service. The error reports the installed edge-tts version; persistent
+rejection can still require an upstream service compatibility fix. Ready-made desktop apps
+embed their dependencies: updating Python packages does not update an existing app. Rebuild
+the app using the instructions below, or install a newer Parley desktop build.
+
 ## Ready-made app (macOS, Windows)
 
 `packaging/build.py` turns the desktop app into a program that needs no Python and has ffmpeg

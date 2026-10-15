@@ -10,6 +10,7 @@ from typing import Callable, Optional
 import edge_tts
 
 from ..mp3tags import Tags, write_tags
+from ..tts_errors import TTSError, describe_tts_error
 from .chunker import DEFAULT_CHUNK_SIZE, split_text
 
 MAX_RETRIES = 3
@@ -41,7 +42,9 @@ async def _synthesize_chunk(
             last_error = error
             if attempt < MAX_RETRIES:
                 await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
-    raise RuntimeError(f"chunk failed after {MAX_RETRIES} attempts: {last_error}")
+    raise TTSError(
+        f"chunk failed after {MAX_RETRIES} attempts: {describe_tts_error(last_error)}"
+    ) from last_error
 
 
 async def build_audiobook(

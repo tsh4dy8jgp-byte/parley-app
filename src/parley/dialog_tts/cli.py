@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import List
 
 from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
+from ..tts_errors import TTSError
 from .render import RenderOptions, render_scripts
 from .script import Pause, Script, ScriptError, Sound, fmt_time, load_lexicon, parse_file
 from .sounds import attach_sounds, default_folder, length_ms
@@ -176,6 +177,8 @@ def main(argv=None) -> None:
         {"render": cmd_render, "voices": cmd_voices}[a.cmd](a)
     except KeyboardInterrupt:
         raise SystemExit(130)
+    except TTSError as error:
+        raise SystemExit(f"error: {error}") from None
 
 
 if __name__ == "__main__":
