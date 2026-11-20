@@ -2,49 +2,12 @@
 
 from __future__ import annotations
 
-import asyncio
 import sys
 from pathlib import Path
 from typing import Callable, Optional
 
-import edge_tts
-
 from ..mp3tags import Tags, write_tags
-from ..tts_errors import TTSError, describe_tts_error
-from .chunker import DEFAULT_CHUNK_SIZE, split_text
-
-MAX_RETRIES = 3
-RETRY_BACKOFF_SECONDS = 2.0
-
-
-async def _synthesize_chunk(
-    text: str,
-    voice: str,
-    rate: str,
-    volume: str,
-    pitch: str,
-) -> bytes:
-    """Synthesize one chunk, retrying on transient network/service errors."""
-    last_error: Optional[Exception] = None
-    for attempt in range(1, MAX_RETRIES + 1):
-        try:
-            communicate = edge_tts.Communicate(
-                text, voice, rate=rate, volume=volume, pitch=pitch
-            )
-            audio = bytearray()
-            async for message in communicate.stream():
-                if message["type"] == "audio":
-                    audio.extend(message["data"])
-            if not audio:
-                raise RuntimeError("service returned no audio data")
-            return bytes(audio)
-        except Exception as error:  # noqa: BLE001 - retry any transient failure
-            last_error = error
-            if attempt < MAX_RETRIES:
-                await asyncio.sleep(RETRY_BACKOFF_SECONDS * attempt)
-    raise TTSError(
-        f"chunk failed after {MAX_RETRIES} attempts: {describe_tts_error(last_error)}"
-    ) from last_error
+from .chunker import DEFAULT_CHUNK_SIZE, speakable, split_text
 
 
 async def build_audiobook(
@@ -57,41 +20,43 @@ async def build_audiobook(
     pitch: str = "+0Hz",
     max_chars: int = DEFAULT_CHUNK_SIZE,
     concurrency: int = 4,
+    safe_mode: bool = True,
     tags: Optional[Tags] = None,
     on_progress: Optional[Callable[[int, int], None]] = None,
+    backend=None,
 ) -> Path:
     """Convert *text* into an MP3 audiobook at *output_path*.
 
-    Chunks are synthesized concurrently (bounded by *concurrency*) and
-    written to the output file in their original order. *tags* (if given) are
-    written as ID3 tags; an empty title becomes the file name. Edge TTS emits a
-    self-contained MP3 stream per request, so streams can be concatenated
-    directly.
+    Chunks are synthesized concurrently (at most *concurrency* at a time; Safe Mode, on by default,
+    uses at most 2 and retries failed chunks in rounds, see dialog_tts.tts.SAFE) and written to the
+    output file in their original order. Chunks with nothing to say ("* * *") are skipped. *tags*
+    (if given) are written as ID3 tags; an empty title becomes the file name. Edge TTS emits a
+    self-contained MP3 stream per request, so streams can be concatenated directly. *backend*
+    replaces the edge-tts backend (tests).
     """
-    chunks = split_text(text, max_chars=max_chars)
+    # Imported here: dialog_tts imports audiobook.voices, so a module-level import would be circular.
+    from ..dialog_tts.tts import EdgeBackend, SynthesisFailed, policy_for, synth_all
+    from ..dialog_tts.voices import VoiceSpec
+
+    chunks = [c for c in split_text(text, max_chars=max_chars) if speakable(c)]
     if not chunks:
         raise ValueError("no text to synthesize")
 
-    semaphore = asyncio.Semaphore(max(1, concurrency))
-    done = 0
-
-    async def worker(index: int, chunk: str) -> "tuple[int, bytes]":
-        nonlocal done
-        async with semaphore:
-            audio = await _synthesize_chunk(chunk, voice, rate, volume, pitch)
-        done += 1
-        if on_progress:
-            on_progress(done, len(chunks))
-        return index, audio
-
-    results = await asyncio.gather(*(worker(i, c) for i, c in enumerate(chunks)))
-    results.sort(key=lambda item: item[0])
+    spec = VoiceSpec(voice, rate=rate, pitch=pitch, volume=volume)
+    jobs = [(chunk, spec) for chunk in chunks]
+    backend = backend or EdgeBackend(policy_for(safe_mode, concurrency))
+    try:
+        audio = await synth_all(backend, jobs, on_progress)
+    except SynthesisFailed as error:
+        for i, job in enumerate(jobs, 1):
+            error.where.setdefault(job, []).append(f"part {i}")
+        raise
 
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "wb") as handle:
-        for _, audio in results:
-            handle.write(audio)
+        for job in jobs:
+            handle.write(audio[job])
     if tags is not None:
         write_tags(output_path, tags.with_title(output_path.stem))
     return output_path
@@ -104,4 +69,11 @@ def print_progress(done: int, total: int) -> None:
     bar = "#" * filled + "-" * (width - filled)
     end = "\n" if done == total else ""
     sys.stderr.write(f"\r[{bar}] {done}/{total} chunks{end}")
+    sys.stderr.flush()
+
+
+def print_waiting(seconds: float, chunks: int, round_: int, rounds: int) -> None:
+    """Safe Mode is about to wait before trying failed chunks again."""
+    sys.stderr.write(f"\n{chunks} chunk{'s' * (chunks != 1)} got no audio yet; trying again in "
+                     f"{seconds:.0f} s (round {round_} of {rounds})\n")
     sys.stderr.flush()

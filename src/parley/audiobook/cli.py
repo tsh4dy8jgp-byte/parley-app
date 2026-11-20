@@ -11,8 +11,9 @@ from pathlib import Path
 from ..mp3tags import add_tag_args, read_cover_error, tags_from_args
 from ..readtext import read_text as read_file
 from ..tts_errors import TTSError
-from .builder import build_audiobook, print_progress
-from .chunker import DEFAULT_CHUNK_SIZE
+from ..dialog_tts.tts import wait_listener
+from .builder import build_audiobook, print_progress, print_waiting
+from .chunker import DEFAULT_CHUNK_SIZE, speakable
 from .voices import is_multilingual, list_voices, multilingual_warning, resolve_voice
 
 SOUND_CUE = re.compile(r"^\s*\[sound\s+\w[^\]]*\]\s*$", re.M | re.I)   # Parley's insert lines
@@ -59,7 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
         "--concurrency",
         type=int,
         default=4,
-        help="Parallel TTS requests (default: %(default)s).",
+        help="Parallel TTS requests (default: %(default)s; Safe Mode uses at most 2).",
+    )
+    parser.add_argument(
+        "--no-safe-mode",
+        dest="safe_mode",
+        action="store_false",
+        help="Turn off Safe Mode (fewer parallel requests, a check for cut-off audio, and up to "
+        "3 minutes of retry rounds for chunks that fail). Faster, but fails more often.",
     )
     add_tag_args(parser)
     parser.add_argument(
@@ -96,6 +104,8 @@ async def run(args: argparse.Namespace) -> None:
     text = read_text(args.input)
     if not text.strip():
         raise SystemExit("error: input text is empty")
+    if not speakable(text):
+        raise SystemExit("error: input text has nothing to say (no letter or digit)")
 
     if SOUND_CUE.search(text):
         print("warning: the text has [sound Name] lines, which this tool reads aloud as text. To insert "
@@ -116,6 +126,7 @@ async def run(args: argparse.Namespace) -> None:
         pitch=args.pitch,
         max_chars=args.chunk_size,
         concurrency=args.concurrency,
+        safe_mode=args.safe_mode,
         tags=tags,
         on_progress=print_progress,
     )
@@ -125,12 +136,15 @@ async def run(args: argparse.Namespace) -> None:
 
 def main() -> None:
     args = build_parser().parse_args()
+    token = wait_listener.set(print_waiting)
     try:
         asyncio.run(run(args))
     except KeyboardInterrupt:
         raise SystemExit(130)
     except TTSError as error:
         raise SystemExit(f"error: {error}") from None
+    finally:
+        wait_listener.reset(token)
 
 
 if __name__ == "__main__":

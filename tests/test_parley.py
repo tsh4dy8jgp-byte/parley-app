@@ -394,15 +394,15 @@ def test_narration_mp3_gets_tags(tmp_path):
 
     from parley.audiobook import builder
 
-    async def fake(*_a, **_k):
-        return b"\xff\xfb\x90\x00" + b"\x00" * 200
-    old, builder._synthesize_chunk = builder._synthesize_chunk, fake
-    try:
-        out = tmp_path / "book.mp3"
-        asyncio.run(builder.build_audiobook("Hello world.", "en-US-GuyNeural", out,
-                                            tags=jobs.tags_for(st.Settings(artist="Me"))))
-    finally:
-        builder._synthesize_chunk = old
+    class Mp3Backend:
+        fmt = "mp3"
+
+        async def synth(self, text, spec):
+            return b"\xff\xfb\x90\x00" + b"\x00" * 200
+
+    out = tmp_path / "book.mp3"
+    asyncio.run(builder.build_audiobook("Hello world.", "en-US-GuyNeural", out, backend=Mp3Backend(),
+                                        tags=jobs.tags_for(st.Settings(artist="Me"))))
     t = ID3(out)
     assert (t["TIT2"].text[0], t["TPE1"].text[0], t["TALB"].text[0]) == ("book", "Me", "Parley")
 

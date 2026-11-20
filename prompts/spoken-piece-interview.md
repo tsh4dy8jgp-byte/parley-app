@@ -155,6 +155,8 @@ Harbour   fade_in=2 fade_out=3 volume=-8dB   # Waves against the harbour wall
 - One spoken turn per line, starting with `[Role]`. Keep a turn to 1–3 sentences and split long
   narration over several `[Narrator]` lines.
 - `[pause N]` goes on its own line, in seconds: 1–1.5 between beats, 2–3 between scenes.
+- Every spoken line needs at least one letter or digit. A line like `[Anna] ...` is an error,
+  because the voice service returns no audio for it. For a silence, use `[pause N]`.
 - Scene headings and stage directions are `#` comments. They are never spoken.
 - `[sound Name]` goes on its own line where an insert plays, and every insert is declared in
   `@sounds` (see Music and sound inserts).

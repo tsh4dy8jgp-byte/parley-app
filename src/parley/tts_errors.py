@@ -22,4 +22,6 @@ def describe_tts_error(error: Optional[Exception]) -> str:
             "allows the Microsoft speech service. If this persists, update Parley; "
             "desktop apps need a rebuilt bundle to receive edge-tts fixes."
         )
+    if isinstance(error, ClientResponseError):     # str() would include the token-bearing URL
+        return f"HTTP {error.status}: {error.message}"
     return str(error)

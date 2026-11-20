@@ -89,7 +89,9 @@ class Settings:
     one_file_each: bool = True
     # Sounds: folder of the files for [sound Name] lines ("" = sounds/ next to the opened file)
     sounds_dir: str = ""
-    # Performance
+    # Performance. Safe Mode: at most 2 requests at a time, a check for cut-off clips, and retry
+    # rounds for failed lines (dialog_tts.tts.SAFE); off is faster but fails more often.
+    safe_mode: bool = True
     concurrency: int = 4
     chunk_size: int = DEFAULT_CHUNK_SIZE
     cache_dir: str = str(CACHE_DIR)

@@ -15,6 +15,12 @@ DEFAULT_CHUNK_SIZE = 3000
 _SENTENCE_END = re.compile(r"(?<=[.!?。！？…])\s+")
 
 
+def speakable(text: str) -> bool:
+    """True when *text* has a letter or digit. The voice service returns no audio for text without
+    one (a line of only "..." or "* * *"), and edge-tts reports that as an error."""
+    return any(ch.isalnum() for ch in text)
+
+
 def split_text(text: str, max_chars: int = DEFAULT_CHUNK_SIZE) -> List[str]:
     """Split *text* into chunks of at most *max_chars* characters.
 

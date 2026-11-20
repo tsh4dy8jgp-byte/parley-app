@@ -25,6 +25,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable, Dict, Iterator, List, Mapping, Optional, Tuple, Union
 
+from ..audiobook.chunker import speakable
 from ..readtext import read_text
 from .voices import PROSODY_KEYS, VoiceSpec, validate_prosody
 
@@ -238,6 +239,10 @@ def parse_text(
         if not spoken.strip():
             err(n, "empty utterance")
             continue
+        if not speakable(spoken):
+            err(n, f"nothing to say in {body[:40]!r}: the voice service returns no audio for a line "
+                   "without letters or digits (for a silence, use [pause N] on its own line)")
+            continue
         segments.append(Utterance(n, role, shown, spoken, spec, repeat, tuple(mod_names)))
 
     if problems:
@@ -309,7 +314,7 @@ def parse_narration(
         else:
             for chunk in split(item):
                 shown, spoken = _apply_lexicon(chunk, header.lexicon)
-                if spoken.strip():
+                if speakable(spoken):          # "* * *" between two sounds says nothing: skip it
                     segments.append(Utterance(n, role, shown, spoken, narrator))
     if problems:
         raise ScriptError(sorted(problems, key=lambda p: p[1]))

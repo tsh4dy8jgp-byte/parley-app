@@ -20,21 +20,23 @@ def forbidden(error_type=WSServerHandshakeError):
 
 
 @pytest.fixture(params=["dialogue", "audiobook"])
-def engine(request, monkeypatch):
+def engine(request, monkeypatch, tmp_path):
     async def no_sleep(_):
         pass
 
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
     if request.param == "dialogue":
-        backend = EdgeBackend(retries=3)
+        backend = EdgeBackend(attempts=3)
 
         async def synth():
             return await backend.synth("Hello.", VoiceSpec("en-US-AvaNeural"))
     else:
+        out = tmp_path / "book.mp3"
+
         async def synth():
-            return await builder._synthesize_chunk(
-                "Hello.", "en-US-AvaNeural", "+0%", "+0%", "+0Hz"
-            )
+            await builder.build_audiobook("Hello.", "en-US-AvaNeural", out, safe_mode=False,
+                                          backend=EdgeBackend(attempts=3))
+            return out.read_bytes()
     return synth
 
 
@@ -100,7 +102,7 @@ def test_failed_audio_is_not_cached(tmp_path, monkeypatch):
             raise forbidden()
 
     monkeypatch.setattr(edge_tts, "Communicate", Rejected)
-    backend = CachedBackend(EdgeBackend(retries=1), tmp_path)
+    backend = CachedBackend(EdgeBackend(attempts=1), tmp_path)
     with pytest.raises(RuntimeError, match="HTTP 403"):
         asyncio.run(backend.synth("Hello.", VoiceSpec("en-US-AvaNeural")))
     assert list(tmp_path.iterdir()) == []

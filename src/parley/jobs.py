@@ -22,7 +22,7 @@ from .dialog_tts.script import (_ROLE_NAME, _TAG_LINE, ROLE_PATTERN, Script, Scr
                                 parse_narration, parse_text)
 from .dialog_tts.sounds import DEFAULT_DIR, SoundFile, attach_sounds, find_sounds
 from .dialog_tts.stitch import Gaps
-from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend
+from .dialog_tts.tts import Backend, CachedBackend, EdgeBackend, policy_for, wait_listener
 from .dialog_tts.voices import VoiceSpec, duplicate_voice_warnings
 
 from .catalog import Catalog
@@ -431,8 +431,8 @@ def estimate_minutes(words: int) -> float:
 
 
 def make_backend(settings: Settings, concurrency: Optional[int] = None) -> Backend:
-    return CachedBackend(EdgeBackend(concurrency=concurrency or settings.concurrency),
-                         Path(settings.cache_dir).expanduser())
+    policy = policy_for(settings.safe_mode, concurrency or settings.concurrency)
+    return CachedBackend(EdgeBackend(policy), Path(settings.cache_dir).expanduser())
 
 
 async def run_dialogue(text: str, settings: Settings, catalog: Catalog, on_progress: Optional[Progress] = None,
@@ -458,7 +458,8 @@ async def run_narration(text: str, settings: Settings, catalog: Catalog, on_prog
     spec = narrator_spec(settings, catalog)
     out = Path(settings.out_dir).expanduser() / f"{safe_name(settings.out_name)}.mp3"
     await build_audiobook(text, spec.voice, out, rate=spec.rate, volume=spec.volume, pitch=spec.pitch,
-                          max_chars=settings.chunk_size, concurrency=settings.concurrency, tags=tags_for(settings),
+                          max_chars=settings.chunk_size, concurrency=settings.concurrency,
+                          safe_mode=settings.safe_mode, tags=tags_for(settings),
                           on_progress=on_progress)
     return [(out, 0)]
 
@@ -478,7 +479,7 @@ async def preview(text: str, spec: VoiceSpec, settings: Settings) -> bytes:
 @dataclass
 class Event:
     kind: str        # what the runner was started for, e.g. "generate", "preview"
-    type: str        # "progress" | "done" | "error" | "cancelled"
+    type: str        # "progress" | "waiting" | "done" | "error" | "cancelled"
     payload: Any = None
 
 
@@ -504,7 +505,13 @@ class Runner:
             raise RuntimeError(f"{self.kind} is already running")
         loop = asyncio.new_event_loop()
         progress = lambda done, total: self.events.put(Event(self.kind, "progress", (done, total)))  # noqa: E731
-        task = loop.create_task(factory(progress))
+        # Safe Mode's pauses before a retry round arrive as "waiting" events: (seconds, lines, round, rounds).
+        waiting = lambda *payload: self.events.put(Event(self.kind, "waiting", payload))  # noqa: E731
+        token = wait_listener.set(waiting)
+        try:
+            task = loop.create_task(factory(progress))     # the task keeps a copy of this context
+        finally:
+            wait_listener.reset(token)
         self._loop, self._task = loop, task
 
         def run() -> None:

@@ -259,3 +259,14 @@ def test_sounds_card_lists_found_and_missing_sounds(app, tmp_path, monkeypatch):
     app.standard.set_text("Plain prose.")
     app.validate_now()
     assert app.advanced.sound_rows == [] and app.advanced.no_sounds.winfo_manager() == "grid"
+
+
+def test_safe_mode_wait_shows_in_the_status_bar(app):
+    from parley import jobs
+
+    assert app.model["safe_mode"].get() is True
+    app._set_running(True)
+    app._handle(jobs.Event("generate", "waiting", (60.0, 3, 2, 3)))
+    assert app.status.cget("text") == "3 lines got no audio yet · Safe Mode tries again in 60 s (round 2 of 3)…"
+    assert app.generate_button.cget("state") == "disabled"          # still running
+    app._set_running(False)

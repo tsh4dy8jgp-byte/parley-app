@@ -12,7 +12,7 @@ from .sounds import load_sound
 from .stitch import (FRAME_RATE, HIFI, Gaps, assemble, clip_ms, decode, finalize, plan_timeline, role_gains,
                      trim_silence)
 from .subtitles import to_lrc, to_srt
-from .tts import Backend, synth_all
+from .tts import Backend, SynthesisFailed, synth_all
 from .voices import VoiceSpec
 
 Job = Tuple[str, VoiceSpec]
@@ -120,6 +120,21 @@ def render_outputs(script: Script, audio: Dict[Job, bytes], fmt: str, out_dir: P
     return written
 
 
+def _where(scripts: Sequence[Script], opts: RenderOptions, many: bool) -> Dict[Job, List[str]]:
+    """Job -> the lines that need it, as "line 12" (or "lektion_02 line 12" for several files)."""
+    out: Dict[Job, List[str]] = {}
+    for s in scripts:
+        prefix = f"{Path(s.path).name.split('.')[0]} " if many else ""
+        for u in s.utterances:
+            variants = [(u.spec, "")] + ([(u.spec.shifted(rate=SLOW_DELTA), " (slow)")] if opts.slow else [])
+            for spec, suffix in variants:
+                places = out.setdefault((u.speak, spec), [])
+                label = f"{prefix}line {u.line}{suffix}"
+                if label not in places:
+                    places.append(label)
+    return out
+
+
 def _sound_clips(script: Script, rate: int, channels: int, opts: RenderOptions) -> Dict:
     """(name, options) -> the leveled, faded clip; each file is decoded once per set of options."""
     out: Dict = {}
@@ -143,7 +158,11 @@ async def render_scripts(scripts: Sequence[Script], backend: Backend, out_dir: P
     jobs: List[Job] = []
     for s in scripts:
         jobs += jobs_for(s, opts)
-    audio = await synth_all(backend, jobs, on_progress)
+    try:
+        audio = await synth_all(backend, jobs, on_progress)
+    except SynthesisFailed as error:
+        error.where = _where(scripts, opts, many=len(scripts) > 1)
+        raise
     written: List[Tuple[Path, int]] = []
     for s in scripts:
         written += render_outputs(s, audio, backend.fmt, out_dir, opts)

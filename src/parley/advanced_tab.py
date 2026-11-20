@@ -228,13 +228,17 @@ class AdvancedTab(ctk.CTkScrollableFrame):
 
         # Performance --------------------------------------------------------------------------
         b = self._card(7, "Performance").body
-        w.SliderRow(b, 0, "Parallel requests", m["concurrency"], 1, 8, 1, lambda v: f"{v:.0f}")
-        w.SliderRow(b, 1, "Narration chunk", m["chunk_size"], 500, 5000, 250, lambda v: f"{v:,.0f} chars")
-        w.label(b, "Cache folder", width=150).grid(row=2, column=0, sticky="w", pady=(6, 0))
+        w.switch(b, "Safe mode", m["safe_mode"]).grid(row=0, column=0, columnspan=3, sticky="w")
+        w.caption(b, "Slower, but fails far less: at most 2 requests at a time, a check for cut-off lines, and "
+                     "up to 3 minutes of retries for lines the voice service drops.", wraplength=520,
+                  justify="left").grid(row=1, column=0, columnspan=3, sticky="w", pady=(4, 10))
+        w.SliderRow(b, 2, "Parallel requests", m["concurrency"], 1, 8, 1, lambda v: f"{v:.0f}")
+        w.SliderRow(b, 3, "Narration chunk", m["chunk_size"], 500, 5000, 250, lambda v: f"{v:,.0f} chars")
+        w.label(b, "Cache folder", width=150).grid(row=4, column=0, sticky="w", pady=(6, 0))
         w.PathPicker(b, m["cache_dir"], kind="dir", title="Cache folder").grid(
-            row=2, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(6, 0))
+            row=4, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(6, 0))
         cache = ctk.CTkFrame(b, fg_color="transparent")
-        cache.grid(row=3, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(6, 0))
+        cache.grid(row=5, column=1, columnspan=2, sticky="ew", padx=(8, 0), pady=(6, 0))
         self.cache_info = w.caption(cache, "")
         self.cache_info.grid(row=0, column=0, sticky="w")
         w.ghost(cache, "Clear cache", self.clear_cache).grid(row=0, column=1, padx=(12, 0))

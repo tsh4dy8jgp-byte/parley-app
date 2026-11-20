@@ -16,7 +16,7 @@ from .render import RenderOptions, render_scripts
 from .script import Pause, Script, ScriptError, Sound, fmt_time, load_lexicon, parse_file
 from .sounds import attach_sounds, default_folder, length_ms
 from .stitch import Gaps
-from .tts import CachedBackend, EdgeBackend
+from .tts import CachedBackend, EdgeBackend, policy_for, wait_listener
 from .voices import check_voices_exist, duplicate_voice_warnings, load_voices_yaml
 
 
@@ -49,7 +49,11 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--loudness", choices=["lufs", "dbfs"], default="lufs",
                    help="equalise voices by EBU R128 loudness or by plain dBFS (%(default)s)")
     r.add_argument("--target", type=float, help="loudness target (default -16 LUFS / -20 dBFS)")
-    r.add_argument("--concurrency", type=int, default=4, help="parallel TTS requests (%(default)s)")
+    r.add_argument("--concurrency", type=int, default=4,
+                   help="parallel TTS requests (%(default)s; Safe Mode uses at most 2)")
+    r.add_argument("--no-safe-mode", dest="safe_mode", action="store_false",
+                   help="turn off Safe Mode (fewer parallel requests, a check for cut-off clips, and up to "
+                   "3 minutes of retry rounds for lines that fail): faster, but fails more often")
     r.add_argument("--cache-dir", default=".dialog_tts_cache", help="TTS cache folder (%(default)s)")
     add_tag_args(r)
 
@@ -129,6 +133,12 @@ def _progress(done: int, total: int) -> None:
     sys.stderr.flush()
 
 
+def _waiting(seconds: float, lines: int, round_: int, rounds: int) -> None:
+    sys.stderr.write(f"\n  {lines} line{'s' * (lines != 1)} got no audio yet; trying again in {seconds:.0f} s "
+                     f"(round {round_} of {rounds})\n")
+    sys.stderr.flush()
+
+
 def cmd_render(a: argparse.Namespace) -> None:
     scripts = load_scripts(expand(a.files), a.voices, a.continue_speaker, a.lexicon, a.sounds)
     if a.dry_run:
@@ -143,9 +153,13 @@ def cmd_render(a: argparse.Namespace) -> None:
     )
     if (problem := read_cover_error(opts.tags)):
         raise SystemExit(f"error: {problem}")
-    backend = CachedBackend(EdgeBackend(concurrency=a.concurrency), Path(a.cache_dir))
+    backend = CachedBackend(EdgeBackend(policy_for(a.safe_mode, a.concurrency)), Path(a.cache_dir))
     t0 = time.perf_counter()
-    written = asyncio.run(render_scripts(scripts, backend, Path(a.out), opts, _progress))
+    token = wait_listener.set(_waiting)
+    try:
+        written = asyncio.run(render_scripts(scripts, backend, Path(a.out), opts, _progress))
+    finally:
+        wait_listener.reset(token)
     elapsed = time.perf_counter() - t0
     for path, ms in written:
         dur = f"{ms / 1000:7.1f} s" if path.suffix == ".mp3" else ""

@@ -559,6 +559,12 @@ class ParleyApp(*_BASES):
             self.set_status(f"Preview failed: {_first_line(ev.payload)}", "error")
 
     def _handle_generate(self, ev: jobs.Event) -> None:
+        if ev.type == "waiting":
+            seconds, lines, round_, rounds = ev.payload
+            unit = "part" if self._unit == "parts" else "line"
+            self.set_status(f"{lines} {unit}{'s' * (lines != 1)} got no audio yet · Safe Mode tries again in "
+                            f"{seconds:.0f} s (round {round_} of {rounds})…", "info")
+            return
         if ev.type == "progress":
             done, total = ev.payload
             self.progress.set(done / max(total, 1))

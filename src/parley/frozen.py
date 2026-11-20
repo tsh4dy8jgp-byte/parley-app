@@ -113,7 +113,7 @@ def _check_speech() -> str:
     from .dialog_tts.tts import EdgeBackend
     from .dialog_tts.voices import VoiceSpec
 
-    mp3 = asyncio.run(EdgeBackend(retries=2).synth("Hello from Parley.", VoiceSpec("en-US-AvaNeural")))
+    mp3 = asyncio.run(EdgeBackend(attempts=2).synth("Hello from Parley.", VoiceSpec("en-US-AvaNeural")))
     return f"{len(decode(mp3, 'mp3'))} ms from en-US-AvaNeural"
 
 
